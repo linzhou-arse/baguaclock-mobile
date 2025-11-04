@@ -1,0 +1,114 @@
+{
+  "app": {
+    "bundleName": "com.quanhang.baguaclock",
+    "vendor": "quanhang",
+    "version": {
+      "code": 1,
+      "name": "2.0.0"
+    },
+    "apiVersion": {
+      "compatible": 9,
+      "target": 9,
+      "releaseType": "Release"
+    }
+  },
+  "deviceConfig": {
+    "default": {
+      "keepAlive": false,
+      "network": {
+        "cleartextTraffic": true,
+        "securityConfig": {
+          "domainSettings": {
+            "cleartextPermitted": true,
+            "domains": [
+              {
+                "name": "localhost"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "phone": {
+      "keepAlive": false,
+      "network": {
+        "cleartextTraffic": true
+      }
+    },
+    "tablet": {
+      "keepAlive": false,
+      "network": {
+        "cleartextTraffic": true
+      }
+    }
+  },
+  "module": {
+    "package": "com.quanhang.baguaclock",
+    "name": ".MyApplication",
+    "mainAbility": "MainAbility",
+    "deviceType": [
+      "phone",
+      "tablet"
+    ],
+    "distro": {
+      "deliveryWithInstall": true,
+      "moduleName": "entry",
+      "moduleType": "entry",
+      "installationFree": false
+    },
+    "abilities": [
+      {
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ],
+        "orientation": "unspecified",
+        "name": "MainAbility",
+        "icon": "$media:icon",
+        "description": "$string:mainability_description",
+        "label": "$string:entry_MainAbility",
+        "type": "page",
+        "launchType": "standard"
+      }
+    ],
+    "reqPermissions": [
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "需要网络权限用于数据同步",
+        "usedScene": {
+          "abilities": [
+            "MainAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.READ_MEDIA",
+        "reason": "需要读取媒体文件权限",
+        "usedScene": {
+          "abilities": [
+            "MainAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.WRITE_MEDIA",
+        "reason": "需要写入媒体文件权限",
+        "usedScene": {
+          "abilities": [
+            "MainAbility"
+          ],
+          "when": "inuse"
+        }
+      }
+    ]
+  }
+}
+

@@ -1,0 +1,13 @@
+{
+  "name": "王",
+  "year": 1997,
+  "month": 7,
+  "day": 24,
+  "hour": 11,
+  "gender": "女",
+  "leap_month": false,
+  "province": "河南省",
+  "city": "请选择城市",
+  "precise_hour": 22,
+  "precise_minute": 30
+}

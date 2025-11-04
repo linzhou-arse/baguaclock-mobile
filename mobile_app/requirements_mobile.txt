@@ -1,0 +1,14 @@
+# 移动端依赖包
+kivy>=2.1.0
+kivymd>=1.1.0
+
+# 保持原有业务逻辑依赖
+lunar-python>=1.4.0
+sxtwl>=1.0.0
+requests>=2.25.0
+
+# 移动端特定依赖
+plyer>=2.1.0  # 用于访问移动端功能（通知、文件等）
+pyjnius>=1.4.0  # Android平台Python-Java桥接
+pyobjus>=1.1.0  # iOS平台Python-ObjC桥接（如果需要）
+

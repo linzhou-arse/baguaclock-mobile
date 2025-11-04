@@ -1,0 +1,85 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-pip \
+            python3-dev \
+            build-essential \
+            git \
+            unzip \
+            openjdk-11-jdk \
+            libffi-dev \
+            libssl-dev \
+            zlib1g-dev \
+            libncurses5-dev \
+            libbz2-dev \
+            libreadline-dev \
+            libsqlite3-dev \
+            liblzma-dev
+      
+      - name: Install buildozer
+        run: |
+          pip3 install --upgrade pip
+          pip3 install buildozer
+          pip3 install cython
+      
+      - name: Copy modules
+        working-directory: mobile_app
+        run: |
+          python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
+      
+      - name: Build APK
+        working-directory: mobile_app
+        env:
+          ANDROIDSDK: ${{ secrets.ANDROIDSDK }}
+        run: |
+          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
+            buildozer android release
+          else
+            buildozer android debug
+          fi
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: apk-file
+          path: mobile_app/bin/*.apk
+          retention-days: 30
+      
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-log
+          path: mobile_app/.buildozer/
+          retention-days: 7
+
