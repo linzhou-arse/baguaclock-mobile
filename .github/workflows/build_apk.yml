@@ -177,34 +177,103 @@ jobs:
             done
           }
           
-          # 验证许可文件是否存在
+          # 创建许可文件目录
           LICENSES_DIR="$ANDROID_SDK_ROOT/licenses"
           mkdir -p "$LICENSES_DIR"
           
-          # 创建所有已知的许可文件（自动接受所有许可）
-          echo "创建许可文件..."
-          for license in android-sdk-preview-license android-sdk-license android-googletv-license android-sdk-arm-dbt-license google-gdk-license; do
-            echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$LICENSES_DIR/$license"
+          # 创建所有已知的许可文件（这是最可靠的方法）
+          echo "创建Android SDK许可文件..."
+          LICENSE_HASH="24333f8a63b6825ea9c5514f83c2829b004d1fee"
+          
+          # 所有可能的许可文件名
+          for license in \
+            "android-sdk-preview-license" \
+            "android-sdk-license" \
+            "android-googletv-license" \
+            "android-sdk-arm-dbt-license" \
+            "google-gdk-license" \
+            "intel-android-extra-license" \
+            "mips-android-sysimage-license" \
+            "android-sdk-arm-dbt-license"; do
+            echo "$LICENSE_HASH" > "$LICENSES_DIR/$license"
           done
           
-          # 预先安装所需的build-tools（这样buildozer就不需要再下载了）
-          echo "预先安装Android SDK Build-Tools 36.1.0..."
-          sdkmanager --licenses <<< "y" > /dev/null 2>&1 || true
+          echo "✅ 已创建 $(ls -1 "$LICENSES_DIR" | wc -l) 个许可文件"
           
-          # 安装build-tools
-          sdkmanager "build-tools;36.1.0" "platforms;android-31" "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" <<< "y" || {
-            # 如果失败，再试一次
-            echo "y" | sdkmanager "build-tools;36.1.0" "platforms;android-31" "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" || true
+          # 使用expect脚本接受许可（更可靠）
+          echo "使用expect脚本接受许可..."
+          cat > /tmp/accept_all_licenses.exp << 'EXPECT_SCRIPT'
+          #!/usr/bin/expect -f
+          set timeout 60
+          spawn sdkmanager --licenses
+          expect {
+              "Accept? (y/N):" {
+                  send "y\r"
+                  exp_continue
+              }
+              "y/N" {
+                  send "y\r"
+                  exp_continue
+              }
+              "All SDK package licenses accepted" {
+                  send_user "✅ 所有许可已接受\n"
+                  exp_continue
+              }
+              eof
+          }
+          EXPECT_SCRIPT
+          chmod +x /tmp/accept_all_licenses.exp
+          
+          # 运行expect脚本
+          /tmp/accept_all_licenses.exp || {
+            echo "⚠️  expect脚本失败，使用备用方法..."
+            # 备用方法：多次尝试
+            for i in {1..30}; do
+              echo "y" | sdkmanager --licenses 2>&1 | grep -q "All SDK package licenses accepted" && break
+              sleep 1
+            done
+          }
+          
+          # 验证许可文件
+          if [ -f "$LICENSES_DIR/android-sdk-license" ]; then
+            echo "✅ 许可文件已创建"
+            cat "$LICENSES_DIR/android-sdk-license"
+          fi
+          
+          # 预先安装所需的build-tools（使用非交互模式）
+          echo "预先安装Android SDK Build-Tools 36.1.0..."
+          
+          # 设置ANDROID_SDK_ROOT环境变量
+          export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          
+          # 安装build-tools（使用环境变量确保许可被识别）
+          yes | sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            "build-tools;36.1.0" \
+            "platforms;android-31" \
+            "platform-tools" \
+            "ndk;25.1.8937393" \
+            2>&1 | tee /tmp/sdk_install.log || {
+            echo "⚠️  安装可能失败，查看日志..."
+            tail -n 20 /tmp/sdk_install.log
           }
           
           # 验证安装
           if [ -d "$ANDROID_SDK_ROOT/build-tools/36.1.0" ]; then
             echo "✅ Android SDK Build-Tools 36.1.0 已安装"
+            ls -la "$ANDROID_SDK_ROOT/build-tools/36.1.0/bin/" | head -n 10
           else
-            echo "⚠️  警告：Build-Tools可能未完全安装，但将继续构建"
+            echo "⚠️  警告：Build-Tools目录未找到"
+            echo "SDK目录内容："
+            ls -la "$ANDROID_SDK_ROOT/" || true
           fi
           
-          echo "✅ Android SDK组件已安装，许可已接受"
+          # 确保许可文件对buildozer可见
+          echo "许可文件位置：$LICENSES_DIR"
+          ls -la "$LICENSES_DIR" || true
+          
+          echo "✅ Android SDK组件安装完成"
       
       - name: Build APK
         working-directory: mobile_app
@@ -214,10 +283,43 @@ jobs:
           echo "构建类型: ${{ github.event.inputs.build_type }}"
           echo "=========================================="
           
-          # buildozer会在其自己的目录中管理SDK
           # 设置环境变量指向buildozer的SDK目录
           export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
           export ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+          
+          # 验证SDK和许可文件存在
+          echo "验证Android SDK环境..."
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          
+          if [ -d "$ANDROID_HOME" ]; then
+            echo "✅ SDK目录存在"
+            echo "SDK目录内容："
+            ls -la "$ANDROID_HOME/" | head -n 10
+            
+            if [ -d "$ANDROID_HOME/licenses" ]; then
+              echo "✅ 许可目录存在"
+              echo "许可文件："
+              ls -la "$ANDROID_HOME/licenses/" || true
+            else
+              echo "⚠️  许可目录不存在，创建..."
+              mkdir -p "$ANDROID_HOME/licenses"
+              echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+            fi
+            
+            if [ -d "$ANDROID_HOME/build-tools/36.1.0" ]; then
+              echo "✅ Build-Tools 36.1.0 已安装"
+              if [ -f "$ANDROID_HOME/build-tools/36.1.0/bin/aidl" ]; then
+                echo "✅ aidl工具已找到"
+              else
+                echo "⚠️  aidl工具未找到"
+              fi
+            else
+              echo "⚠️  Build-Tools 36.1.0 未找到"
+            fi
+          else
+            echo "⚠️  SDK目录不存在，buildozer将创建它"
+          fi
           
           # 创建wrapper脚本来处理许可接受
           cat > build_with_licenses.sh << 'SCRIPT'
