@@ -49,8 +49,12 @@ jobs:
       - name: Set up environment variables
         run: |
           # sdkmanager需要Java 17或更高版本
+          # 强制设置Java 17，覆盖系统默认的Java 11
           echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
-          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
+          echo "PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH" >> $GITHUB_ENV
+          # 验证设置
+          echo "✅ 环境变量已设置："
+          echo "JAVA_HOME将在后续步骤中设置为: /usr/lib/jvm/temurin-17-jdk-amd64"
       
       - name: Install buildozer and dependencies
         run: |
@@ -102,6 +106,24 @@ jobs:
           echo "预先下载Android SDK并接受许可"
           echo "=========================================="
           
+          # 确保使用Java 17（sdkmanager需要Java 17，class file version 61.0）
+          # Java 11的class file version是55.0，无法运行sdkmanager
+          export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
+          # 验证Java版本
+          echo "验证Java版本..."
+          java -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          
+          # 检查Java版本是否符合要求（必须是17或更高）
+          JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
+          if [ "$JAVA_VERSION" -lt 17 ]; then
+            echo "❌ 错误：Java版本 $JAVA_VERSION 过低，sdkmanager需要Java 17或更高版本"
+            exit 1
+          fi
+          echo "✅ Java版本检查通过：$JAVA_VERSION"
+          
           # 设置Android SDK目录（与buildozer使用相同的路径）
           ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
           mkdir -p "$ANDROID_SDK_ROOT"
@@ -147,10 +169,13 @@ jobs:
           
           # 接受所有许可（使用expect脚本）
           echo "接受Android SDK许可..."
-          cat > /tmp/accept_licenses.exp << 'EXPECT'
+          # 创建expect脚本，确保使用Java 17
+          cat > /tmp/accept_licenses.exp << EXPECT
           #!/usr/bin/expect -f
           set timeout 300
-          spawn sdkmanager --licenses
+          set env(JAVA_HOME) "$JAVA_HOME"
+          set env(PATH) "$JAVA_HOME/bin:$env(PATH)"
+          spawn "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
           expect {
               "Accept? (y/N):" {
                   send "y\r"
@@ -168,12 +193,12 @@ jobs:
           # 安装expect如果还没有
           sudo apt-get install -y expect > /dev/null 2>&1 || true
           
-          # 运行expect脚本接受许可
-          /tmp/accept_licenses.exp || {
+          # 运行expect脚本接受许可（使用Java 17）
+          JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" /tmp/accept_licenses.exp || {
             # 如果expect失败，使用简单方法
             echo "使用简单方法接受许可..."
             for i in {1..20}; do
-              echo "y" | sdkmanager --licenses > /dev/null 2>&1 && break
+              JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" echo "y" | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 && break
               sleep 1
             done
           }
@@ -203,10 +228,12 @@ jobs:
           
           # 使用expect脚本接受许可（更可靠）
           echo "使用expect脚本接受许可..."
-          cat > /tmp/accept_all_licenses.exp << 'EXPECT_SCRIPT'
+          cat > /tmp/accept_all_licenses.exp << EXPECT_SCRIPT
           #!/usr/bin/expect -f
           set timeout 60
-          spawn sdkmanager --licenses
+          set env(JAVA_HOME) "$JAVA_HOME"
+          set env(PATH) "$JAVA_HOME/bin:$env(PATH)"
+          spawn "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
           expect {
               "Accept? (y/N):" {
                   send "y\r"
@@ -225,12 +252,12 @@ jobs:
           EXPECT_SCRIPT
           chmod +x /tmp/accept_all_licenses.exp
           
-          # 运行expect脚本
-          /tmp/accept_all_licenses.exp || {
+          # 运行expect脚本（使用Java 17）
+          JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" /tmp/accept_all_licenses.exp || {
             echo "⚠️  expect脚本失败，使用备用方法..."
-            # 备用方法：多次尝试
+            # 备用方法：多次尝试（使用Java 17）
             for i in {1..30}; do
-              echo "y" | sdkmanager --licenses 2>&1 | grep -q "All SDK package licenses accepted" && break
+              JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" echo "y" | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses 2>&1 | grep -q "All SDK package licenses accepted" && break
               sleep 1
             done
           }
@@ -249,7 +276,9 @@ jobs:
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           
           # 安装build-tools（使用环境变量确保许可被识别）
-          yes | sdkmanager \
+          # 确保使用Java 17执行sdkmanager
+          echo "使用Java 17执行sdkmanager安装组件..."
+          JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             --sdk_root="$ANDROID_SDK_ROOT" \
             "build-tools;36.1.0" \
             "platforms;android-31" \
@@ -258,6 +287,9 @@ jobs:
             2>&1 | tee /tmp/sdk_install.log || {
             echo "⚠️  安装可能失败，查看日志..."
             tail -n 20 /tmp/sdk_install.log
+            echo "检查Java版本..."
+            java -version
+            echo "JAVA_HOME: $JAVA_HOME"
           }
           
           # 验证安装
@@ -293,7 +325,9 @@ jobs:
           #!/bin/bash
           # Wrapper script for sdkmanager
           # sdkmanager需要Java 17或更高版本（class file version 61.0）
-          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
+          # 强制使用Java 17，覆盖任何系统默认值
+          export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
+          export PATH="$JAVA_HOME/bin:$PATH"
           SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
           exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
           SDKWRAPPER
@@ -311,13 +345,24 @@ jobs:
           echo "测试sdkmanager..."
           # 确保使用Java 17
           export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
-          if "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version > /dev/null 2>&1; then
-            echo "✅ sdkmanager测试成功"
-            "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version | head -n 3
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
+          # 先测试cmdline-tools版本（直接调用）
+          echo "测试cmdline-tools版本的sdkmanager..."
+          if JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version > /dev/null 2>&1; then
+            echo "✅ cmdline-tools版本的sdkmanager测试成功"
+            JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version | head -n 3
           else
-            echo "⚠️  sdkmanager测试失败，但继续构建"
-            echo "尝试直接调用cmdline-tools版本..."
-            "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version | head -n 3 || true
+            echo "⚠️  cmdline-tools版本的sdkmanager测试失败"
+            echo "错误信息："
+            JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version 2>&1 || true
+          fi
+          
+          # 测试包装脚本版本
+          if JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version > /dev/null 2>&1; then
+            echo "✅ 包装脚本版本的sdkmanager测试成功"
+          else
+            echo "⚠️  包装脚本版本的sdkmanager测试失败，但继续构建"
           fi
           
           # 确保tools/bin目录在PATH中
@@ -327,19 +372,33 @@ jobs:
       
       - name: Build APK
         working-directory: mobile_app
+        env:
+          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
         run: |
           echo "=========================================="
           echo "开始构建APK..."
           echo "构建类型: ${{ github.event.inputs.build_type }}"
           echo "=========================================="
           
-          # 设置环境变量指向buildozer的SDK目录
+          # 强制设置环境变量指向buildozer的SDK目录
           export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
           export ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
           
-          # 确保使用Java 17（sdkmanager需要）
-          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
+          # 强制使用Java 17（sdkmanager需要，class file version 61.0）
+          # 覆盖任何之前设置的JAVA_HOME（可能是Java 11）
+          export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
           export PATH="$JAVA_HOME/bin:$PATH"
+          
+          # 验证Java版本
+          echo "验证Java环境..."
+          java -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
+          if [ "$JAVA_VERSION" -lt 17 ]; then
+            echo "❌ 错误：Java版本 $JAVA_VERSION 过低，需要Java 17或更高版本"
+            exit 1
+          fi
+          echo "✅ Java版本检查通过：$JAVA_VERSION"
           
           # 验证SDK和许可文件存在
           echo "验证Android SDK环境..."
@@ -375,47 +434,52 @@ jobs:
             echo "⚠️  SDK目录不存在，buildozer将创建它"
           fi
           
-          # 创建wrapper脚本来处理许可接受
-          cat > build_with_licenses.sh << 'SCRIPT'
+          # 创建wrapper脚本来处理许可接受和Java环境
+          cat > build_with_licenses.sh << SCRIPT
           #!/bin/bash
           # Wrapper脚本：自动接受Android SDK许可并构建
+          # 确保使用Java 17
+          
+          # 强制设置Java 17环境
+          export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
+          export PATH="\$JAVA_HOME/bin:\$PATH"
           
           # 函数：接受许可
           accept_licenses() {
-            local sdk_path="$HOME/.buildozer/android/platform/android-sdk"
-            if [ -f "$sdk_path/cmdline-tools/latest/bin/sdkmanager" ]; then
+            local sdk_path="\$HOME/.buildozer/android/platform/android-sdk"
+            if [ -f "\$sdk_path/cmdline-tools/latest/bin/sdkmanager" ]; then
               echo "接受Android SDK许可..."
-              yes | "$sdk_path/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+              JAVA_HOME="\$JAVA_HOME" PATH="\$JAVA_HOME/bin:\$PATH" yes | "\$sdk_path/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
             fi
           }
           
           # 首次尝试接受许可
           accept_licenses
           
-          # 运行构建命令
-          if [ "$1" = "release" ]; then
-            buildozer android release 2>&1 | tee build.log
+          # 运行构建命令（确保使用Java 17）
+          if [ "\$1" = "release" ]; then
+            JAVA_HOME="\$JAVA_HOME" PATH="\$JAVA_HOME/bin:\$PATH" buildozer android release 2>&1 | tee build.log
           else
-            buildozer android debug 2>&1 | tee build.log
+            JAVA_HOME="\$JAVA_HOME" PATH="\$JAVA_HOME/bin:\$PATH" buildozer android debug 2>&1 | tee build.log
           fi
           
-          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          BUILD_EXIT_CODE=\${PIPESTATUS[0]}
           
           # 如果构建失败且日志显示许可问题，再次接受许可并重试
-          if [ $BUILD_EXIT_CODE -ne 0 ] && grep -q "license.*not accepted\|Accept? (y/N)" build.log 2>/dev/null; then
+          if [ \$BUILD_EXIT_CODE -ne 0 ] && grep -q "license.*not accepted\|Accept? (y/N)" build.log 2>/dev/null; then
             echo "检测到许可问题，重新接受许可并重试..."
             accept_licenses
             sleep 2
             
-            if [ "$1" = "release" ]; then
-              buildozer android release 2>&1 | tee -a build.log
+            if [ "\$1" = "release" ]; then
+              JAVA_HOME="\$JAVA_HOME" PATH="\$JAVA_HOME/bin:\$PATH" buildozer android release 2>&1 | tee -a build.log
             else
-              buildozer android debug 2>&1 | tee -a build.log
+              JAVA_HOME="\$JAVA_HOME" PATH="\$JAVA_HOME/bin:\$PATH" buildozer android debug 2>&1 | tee -a build.log
             fi
-            BUILD_EXIT_CODE=${PIPESTATUS[0]}
+            BUILD_EXIT_CODE=\${PIPESTATUS[0]}
           fi
           
-          exit $BUILD_EXIT_CODE
+          exit \$BUILD_EXIT_CODE
           SCRIPT
           
           chmod +x build_with_licenses.sh
@@ -425,11 +489,22 @@ jobs:
           # 首次构建可能需要较长时间（10-30分钟）
           set +e  # 不立即退出，先捕获错误
           
-          # 使用wrapper脚本构建
+          # 确保wrapper脚本可执行
+          chmod +x build_with_licenses.sh
+          
+          # 使用wrapper脚本构建（wrapper脚本会确保使用Java 17）
+          echo "使用wrapper脚本构建，确保Java 17环境..."
           ./build_with_licenses.sh "${{ github.event.inputs.build_type }}"
           BUILD_EXIT_CODE=$?
           
           set -e  # 恢复错误退出
+          
+          # 如果构建失败，检查是否是Java版本问题
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "检查Java环境..."
+            echo "当前JAVA_HOME: ${JAVA_HOME:-未设置}"
+            java -version 2>&1 | head -n 3 || echo "无法执行java命令"
+          fi
           
           # 显示构建日志的最后100行
           echo "=========================================="

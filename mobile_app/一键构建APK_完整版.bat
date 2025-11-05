@@ -151,6 +151,24 @@ if "%build_type%"=="" set build_type=1
 REM 获取WSL路径
 for /f "tokens=*" %%p in ('wsl wslpath -u "%CD%"') do set WSL_DIR=%%p
 
+REM 检查并配置Android SDK路径
+echo [配置] 检查Android SDK配置...
+if exist "android_sdk_config.txt" (
+    echo ✅ 找到Android SDK配置文件
+    for /f "tokens=2 delims==" %%a in ('findstr "^ANDROID_SDK_WSL=" android_sdk_config.txt') do (
+        set ANDROID_SDK_WSL=%%a
+        set ANDROID_SDK_WSL=!ANDROID_SDK_WSL:"=!
+        set ANDROID_SDK_WSL=!ANDROID_SDK_WSL:'=!
+    )
+    if defined ANDROID_SDK_WSL (
+        echo 正在设置Android SDK路径：!ANDROID_SDK_WSL!
+    )
+) else (
+    echo ⚠️  未找到Android SDK配置文件
+    echo 建议运行：配置AndroidSDK.bat
+    echo.
+)
+
 REM 执行构建
 echo.
 echo ========================================
@@ -165,19 +183,25 @@ echo - 构建过程中请勿关闭此窗口
 echo.
 
 REM 设置PATH确保能找到buildozer
+REM 同时设置Android SDK环境变量（如果配置文件存在）
+set WSL_ENV_VARS=
+if defined ANDROID_SDK_WSL (
+    set WSL_ENV_VARS=export ANDROIDSDK="!ANDROID_SDK_WSL!" && export ANDROID_HOME="!ANDROID_SDK_WSL!" && export ANDROID_SDK_ROOT="!ANDROID_SDK_WSL!" && 
+)
+
 if exist "build_android.sh" (
     echo 使用构建脚本...
     if "%build_type%"=="2" (
-        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash -c 'BUILD_TYPE=release bash build_android.sh'"
+        wsl bash -c "!WSL_ENV_VARS!export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash -c 'BUILD_TYPE=release bash build_android.sh'"
     ) else (
-        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash build_android.sh"
+        wsl bash -c "!WSL_ENV_VARS!export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash build_android.sh"
     )
 ) else (
     echo 直接使用buildozer...
     if "%build_type%"=="2" (
-        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android release"
+        wsl bash -c "!WSL_ENV_VARS!export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android release"
     ) else (
-        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android debug"
+        wsl bash -c "!WSL_ENV_VARS!export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android debug"
     )
 )
 

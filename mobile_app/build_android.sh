@@ -75,19 +75,168 @@ echo
 
 # 步骤4：检查Android SDK环境
 echo "[4/4] 检查Android SDK环境..."
+
+# 函数：转换Windows路径为WSL路径
+convert_windows_path() {
+    local win_path="$1"
+    # 转换为小写并替换盘符
+    win_path=$(echo "$win_path" | sed 's|^C:|/mnt/c|' | sed 's|^D:|/mnt/d|' | sed 's|^E:|/mnt/e|' | sed 's|^F:|/mnt/f|')
+    # 替换反斜杠为正斜杠
+    win_path=$(echo "$win_path" | sed 's|\\|/|g')
+    echo "$win_path"
+}
+
+# 函数：自动检测Android SDK路径
+auto_detect_sdk() {
+    local sdk_path=""
+    
+    # 方法1：检查环境变量
+    if [ -n "$ANDROIDSDK" ]; then
+        echo "$ANDROIDSDK"
+        return 0
+    fi
+    
+    if [ -n "$ANDROID_HOME" ]; then
+        echo "$ANDROID_HOME"
+        return 0
+    fi
+    
+    if [ -n "$ANDROID_SDK_ROOT" ]; then
+        echo "$ANDROID_SDK_ROOT"
+        return 0
+    fi
+    
+    # 方法2：检查配置文件
+    if [ -f "android_sdk_config.txt" ]; then
+        local wsl_path=$(grep "^ANDROID_SDK_WSL=" android_sdk_config.txt | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        if [ -n "$wsl_path" ] && [ -d "$wsl_path" ]; then
+            echo "$wsl_path"
+            return 0
+        fi
+    fi
+    
+    # 方法3：检查常见WSL路径
+    local common_paths=(
+        "$HOME/Android/Sdk"
+        "/mnt/c/Users/$USER/AppData/Local/Android/Sdk"
+        "/mnt/c/Users/$USER/AppData/Local/Android/Sdk"
+    )
+    
+    for path in "${common_paths[@]}"; do
+        if [ -d "$path" ] && [ -f "$path/platform-tools/adb" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    
+    # 方法4：尝试从Windows路径转换
+    if command -v wslpath >/dev/null 2>&1; then
+        # 检查常见的Windows路径
+        local win_paths=(
+            "$HOME/AppData/Local/Android/Sdk"
+            "/mnt/c/Users/$USER/AppData/Local/Android/Sdk"
+        )
+        
+        for win_path in "${win_paths[@]}"; do
+            local wsl_path=$(convert_windows_path "$win_path")
+            if [ -d "$wsl_path" ] && [ -f "$wsl_path/platform-tools/adb" ]; then
+                echo "$wsl_path"
+                return 0
+            fi
+        done
+    fi
+    
+    return 1
+}
+
+# 自动检测SDK路径
+detected_sdk=$(auto_detect_sdk)
+
 if [ -z "$ANDROIDSDK" ]; then
-    echo "⚠️  警告：未设置ANDROIDSDK环境变量"
-    echo
-    echo "如果构建失败，请设置："
-    echo "export ANDROIDSDK=~/Android/Sdk"
-    echo
-    echo "或者添加到 ~/.bashrc："
-    echo "echo 'export ANDROIDSDK=~/Android/Sdk' >> ~/.bashrc"
-    echo "source ~/.bashrc"
-    echo
+    if [ -n "$detected_sdk" ]; then
+        export ANDROIDSDK="$detected_sdk"
+        export ANDROID_HOME="$detected_sdk"
+        export ANDROID_SDK_ROOT="$detected_sdk"
+        echo "✅ 自动检测到Android SDK: $ANDROIDSDK"
+        echo "   （已设置环境变量，仅当前会话有效）"
+    else
+        echo "⚠️  警告：未设置ANDROIDSDK环境变量且无法自动检测"
+        echo
+        echo "请选择以下方式之一配置："
+        echo
+        echo "方式1：使用配置脚本（推荐）"
+        echo "  在Windows中运行：配置AndroidSDK.bat"
+        echo
+        echo "方式2：手动设置环境变量"
+        echo "  export ANDROIDSDK=/mnt/c/Users/YourName/AppData/Local/Android/Sdk"
+        echo "  export ANDROID_HOME=\$ANDROIDSDK"
+        echo "  export ANDROID_SDK_ROOT=\$ANDROIDSDK"
+        echo
+        echo "方式3：添加到 ~/.bashrc（永久配置）"
+        echo "  echo 'export ANDROIDSDK=/mnt/c/Users/YourName/AppData/Local/Android/Sdk' >> ~/.bashrc"
+        echo "  echo 'export ANDROID_HOME=\$ANDROIDSDK' >> ~/.bashrc"
+        echo "  echo 'export ANDROID_SDK_ROOT=\$ANDROIDSDK' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
+        echo
+        echo "查找Android SDK路径的方法："
+        echo "  1. 打开Android Studio"
+        echo "  2. File > Settings > Appearance & Behavior > System Settings > Android SDK"
+        echo "  3. 查看 'Android SDK Location' 路径"
+        echo "  4. 将Windows路径转换为WSL路径："
+        echo "     C:\\Users\\... → /mnt/c/Users/..."
+        echo
+        read -p "是否继续构建？（可能会失败）[y/N]: " continue_build
+        if [ "$continue_build" != "y" ] && [ "$continue_build" != "Y" ]; then
+            echo "构建已取消"
+            exit 1
+        fi
+    fi
 else
     echo "✅ ANDROIDSDK已设置: $ANDROIDSDK"
 fi
+
+# 验证SDK路径
+if [ -n "$ANDROIDSDK" ]; then
+    if [ ! -d "$ANDROIDSDK" ]; then
+        echo "⚠️  警告：SDK路径不存在: $ANDROIDSDK"
+    elif [ ! -f "$ANDROIDSDK/platform-tools/adb" ]; then
+        echo "⚠️  警告：SDK路径可能不正确（未找到adb）: $ANDROIDSDK"
+    else
+        echo "✅ SDK路径验证通过"
+        echo "   platform-tools: $ANDROIDSDK/platform-tools"
+    fi
+fi
+
+# 检查Java版本（sdkmanager需要Java 17或更高版本）
+echo "检查Java版本..."
+if [ -z "$JAVA_HOME" ]; then
+    # 尝试自动检测Java 17
+    if [ -d "/usr/lib/jvm/temurin-17-jdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
+    elif [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+    elif [ -d "/usr/lib/jvm/java-17" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-17"
+    fi
+fi
+
+if [ -n "$JAVA_HOME" ]; then
+    export PATH="$JAVA_HOME/bin:$PATH"
+    JAVA_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
+    if [ -n "$JAVA_VERSION" ] && [ "$JAVA_VERSION" -ge 17 ]; then
+        echo "✅ Java版本检查通过：$JAVA_VERSION (JAVA_HOME: $JAVA_HOME)"
+    else
+        echo "⚠️  警告：Java版本可能过低（需要17+），当前：$JAVA_VERSION"
+        echo "   如果构建失败，请安装Java 17："
+        echo "   sudo apt-get install openjdk-17-jdk"
+    fi
+else
+    echo "⚠️  警告：未设置JAVA_HOME"
+    echo "   建议安装Java 17："
+    echo "   sudo apt-get install openjdk-17-jdk"
+    echo "   然后设置：export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
+fi
+
 echo
 
 # 构建APK
@@ -144,10 +293,11 @@ if [ $build_result -ne 0 ]; then
     echo "   解决：通过Android Studio的SDK Manager安装NDK"
     echo "   路径：Tools > SDK Manager > SDK Tools > NDK"
     echo
-    echo "3. 找不到Java"
-    echo "   解决：安装Java JDK 11+"
-    echo "   Ubuntu/Debian: sudo apt-get install openjdk-11-jdk"
+    echo "3. 找不到Java或Java版本过低"
+    echo "   解决：安装Java JDK 17或更高版本（sdkmanager需要Java 17）"
+    echo "   Ubuntu/Debian: sudo apt-get install openjdk-17-jdk"
     echo "   下载：https://adoptium.net/"
+    echo "   设置：export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
     echo
     echo "4. 网络问题导致依赖下载失败"
     echo "   解决：检查网络连接，或使用代理"
