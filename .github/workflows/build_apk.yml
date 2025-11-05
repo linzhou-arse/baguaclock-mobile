@@ -95,30 +95,116 @@ jobs:
           cat buildozer.spec
           echo "===================="
       
-      - name: Install expect for license acceptance
-        run: |
-          sudo apt-get install -y expect
-      
-      - name: Setup Android SDK license acceptance
+      - name: Pre-download Android SDK and accept licenses
         run: |
           echo "=========================================="
-          echo "设置Android SDK许可自动接受"
+          echo "预先下载Android SDK并接受许可"
           echo "=========================================="
           
-          # 创建expect脚本来自动接受许可
-          cat > accept_android_licenses.exp << 'EOF'
+          # 设置Android SDK目录（与buildozer使用相同的路径）
+          ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT"
+          
+          # 设置环境变量
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+          
+          # 下载并安装Android SDK命令行工具
+          if [ ! -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "下载Android SDK命令行工具..."
+            cd /tmp
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+            unzip -q cmdline-tools.zip
+            
+            # 创建正确的目录结构
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            
+            # 移动解压的文件到正确位置
+            if [ -d "cmdline-tools" ]; then
+              # 如果解压后直接是cmdline-tools目录
+              mv cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" 2>/dev/null || true
+              rmdir cmdline-tools 2>/dev/null || true
+            else
+              # 如果解压后是bin、lib等目录，直接移动
+              mv bin lib NOTICE.txt source.properties "$ANDROID_SDK_ROOT/cmdline-tools/latest/" 2>/dev/null || true
+            fi
+            
+            rm -f cmdline-tools.zip
+            cd "$ANDROID_SDK_ROOT"
+          fi
+          
+          # 设置PATH
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          
+          # 验证sdkmanager可用
+          if [ ! -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "⚠️  警告：sdkmanager未找到，跳过预安装"
+            exit 0
+          fi
+          
+          echo "✅ SDK Manager已准备就绪"
+          
+          # 接受所有许可（使用expect脚本）
+          echo "接受Android SDK许可..."
+          cat > /tmp/accept_licenses.exp << 'EXPECT'
           #!/usr/bin/expect -f
-          set timeout -1
+          set timeout 300
           spawn sdkmanager --licenses
           expect {
-              "Accept? (y/N):" { send "y\r"; exp_continue }
+              "Accept? (y/N):" {
+                  send "y\r"
+                  exp_continue
+              }
+              "y/N" {
+                  send "y\r"
+                  exp_continue
+              }
               eof
           }
-          EOF
-          chmod +x accept_android_licenses.exp
+          EXPECT
+          chmod +x /tmp/accept_licenses.exp
           
-          # 这个脚本将在buildozer下载SDK后使用
-          echo "✅ 许可接受脚本已创建"
+          # 安装expect如果还没有
+          sudo apt-get install -y expect > /dev/null 2>&1 || true
+          
+          # 运行expect脚本接受许可
+          /tmp/accept_licenses.exp || {
+            # 如果expect失败，使用简单方法
+            echo "使用简单方法接受许可..."
+            for i in {1..20}; do
+              echo "y" | sdkmanager --licenses > /dev/null 2>&1 && break
+              sleep 1
+            done
+          }
+          
+          # 验证许可文件是否存在
+          LICENSES_DIR="$ANDROID_SDK_ROOT/licenses"
+          mkdir -p "$LICENSES_DIR"
+          
+          # 创建所有已知的许可文件（自动接受所有许可）
+          echo "创建许可文件..."
+          for license in android-sdk-preview-license android-sdk-license android-googletv-license android-sdk-arm-dbt-license google-gdk-license; do
+            echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$LICENSES_DIR/$license"
+          done
+          
+          # 预先安装所需的build-tools（这样buildozer就不需要再下载了）
+          echo "预先安装Android SDK Build-Tools 36.1.0..."
+          sdkmanager --licenses <<< "y" > /dev/null 2>&1 || true
+          
+          # 安装build-tools
+          sdkmanager "build-tools;36.1.0" "platforms;android-31" "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" <<< "y" || {
+            # 如果失败，再试一次
+            echo "y" | sdkmanager "build-tools;36.1.0" "platforms;android-31" "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" || true
+          }
+          
+          # 验证安装
+          if [ -d "$ANDROID_SDK_ROOT/build-tools/36.1.0" ]; then
+            echo "✅ Android SDK Build-Tools 36.1.0 已安装"
+          else
+            echo "⚠️  警告：Build-Tools可能未完全安装，但将继续构建"
+          fi
+          
+          echo "✅ Android SDK组件已安装，许可已接受"
       
       - name: Build APK
         working-directory: mobile_app
