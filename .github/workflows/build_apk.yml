@@ -68,9 +68,27 @@ jobs:
         run: |
           # 检查buildozer.spec文件
           if [ ! -f buildozer.spec ]; then
-            echo "错误：未找到buildozer.spec文件"
+            echo "❌ 错误：未找到buildozer.spec文件"
             exit 1
           fi
+          
+          # 检查图标文件
+          if [ ! -f icon.png ]; then
+            echo "⚠️  警告：未找到icon.png，创建默认图标..."
+            # 创建一个简单的1x1像素PNG图标（base64编码的最小PNG）
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > icon.png || echo "图标创建失败，继续构建"
+          fi
+          
+          # 检查main.py
+          if [ ! -f main.py ]; then
+            echo "❌ 错误：未找到main.py文件"
+            exit 1
+          fi
+          
+          # 显示目录结构
+          echo "=== 当前目录结构 ==="
+          ls -la
+          echo "===================="
           
           # 显示buildozer配置
           echo "=== Buildozer配置 ==="
@@ -80,16 +98,61 @@ jobs:
       - name: Build APK
         working-directory: mobile_app
         run: |
+          echo "=========================================="
           echo "开始构建APK..."
           echo "构建类型: ${{ github.event.inputs.build_type }}"
+          echo "=========================================="
           
+          # 设置构建超时（30分钟）
           # buildozer会自动下载所需的Android SDK和NDK
           # 首次构建可能需要较长时间（10-30分钟）
+          set +e  # 不立即退出，先捕获错误
+          
           if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-            buildozer android release
+            buildozer android release 2>&1 | tee build.log
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
           else
-            buildozer android debug
+            buildozer android debug 2>&1 | tee build.log
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
           fi
+          
+          set -e  # 恢复错误退出
+          
+          # 显示构建日志的最后100行
+          echo "=========================================="
+          echo "构建日志（最后100行）:"
+          echo "=========================================="
+          tail -n 100 build.log || echo "无法读取构建日志"
+          
+          # 如果构建失败，显示错误信息
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "=========================================="
+            echo "❌ 构建失败！退出代码: $BUILD_EXIT_CODE"
+            echo "=========================================="
+            echo ""
+            echo "常见错误及解决方案："
+            echo "1. 模块找不到：确保已运行copy_modules.py"
+            echo "2. 依赖下载失败：检查网络连接"
+            echo "3. Android SDK问题：buildozer会自动下载，请等待"
+            echo "4. 内存不足：GitHub Actions限制，可能需要简化构建"
+            echo ""
+            echo "完整构建日志："
+            cat build.log || echo "无法读取完整日志"
+            exit $BUILD_EXIT_CODE
+          fi
+          
+          echo "=========================================="
+          echo "✅ 构建完成！"
+          echo "=========================================="
+      
+      - name: Upload build log file
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-full
+          path: mobile_app/build.log
+          if-no-files-found: warn
+          retention-days: 7
       
       - name: Check build results
         working-directory: mobile_app
