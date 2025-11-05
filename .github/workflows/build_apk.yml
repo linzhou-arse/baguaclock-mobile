@@ -46,42 +46,85 @@ jobs:
             libsqlite3-dev \
             liblzma-dev
       
-      - name: Install buildozer
+      - name: Set up environment variables
+        run: |
+          echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
+          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
+      
+      - name: Install buildozer and dependencies
         run: |
           pip3 install --upgrade pip
+          pip3 install --upgrade cython
           pip3 install buildozer
-          pip3 install cython
+          echo "Buildozer安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
         run: |
           python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
       
+      - name: Prepare build environment
+        working-directory: mobile_app
+        run: |
+          # 检查buildozer.spec文件
+          if [ ! -f buildozer.spec ]; then
+            echo "错误：未找到buildozer.spec文件"
+            exit 1
+          fi
+          
+          # 显示buildozer配置
+          echo "=== Buildozer配置 ==="
+          cat buildozer.spec
+          echo "===================="
+      
       - name: Build APK
         working-directory: mobile_app
-        env:
-          ANDROIDSDK: ${{ secrets.ANDROIDSDK }}
         run: |
+          echo "开始构建APK..."
+          echo "构建类型: ${{ github.event.inputs.build_type }}"
+          
+          # buildozer会自动下载所需的Android SDK和NDK
+          # 首次构建可能需要较长时间（10-30分钟）
           if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
             buildozer android release
           else
             buildozer android debug
           fi
       
+      - name: Check build results
+        working-directory: mobile_app
+        run: |
+          echo "=== 检查构建结果 ==="
+          if [ -d "bin" ]; then
+            echo "bin目录内容:"
+            ls -la bin/
+          else
+            echo "未找到bin目录"
+          fi
+          
+          if [ -d ".buildozer" ]; then
+            echo ".buildozer目录内容:"
+            ls -la .buildozer/
+          fi
+          
+          echo "=================="
+      
       - name: Upload APK
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: apk-file
-          path: mobile_app/bin/*.apk
+          name: apk-file-${{ github.event.inputs.build_type }}
+          path: |
+            mobile_app/bin/*.apk
+            mobile_app/bin/*.aab
           if-no-files-found: warn
           retention-days: 30
       
-      - name: Upload build log
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
+          name: build-logs
           path: |
             mobile_app/.buildozer/**/*.log
             mobile_app/.buildozer/android/platform/build-*/dists/*/build.log
