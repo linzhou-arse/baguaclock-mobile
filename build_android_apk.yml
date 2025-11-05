@@ -33,11 +33,18 @@ jobs:
         with:
           python-version: '3.9'
       
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+      - name: Set up Java 17 (强制设置)
+        run: |
+          # 强制设置Java 17为默认Java版本
+          sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java 17
+          sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac 17
+          sudo update-alternatives --set java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java
+          sudo update-alternatives --set javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+          javac -version
       
       - name: Install system dependencies
         run: |
@@ -59,14 +66,24 @@ jobs:
       
       - name: Set up Android environment
         run: |
-          # 设置环境变量，确保使用Java 17
-          echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
-          echo "ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          # 强制设置环境变量，确保使用Java 17
+          echo "export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $HOME/.bashrc
+          echo "export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $HOME/.bashrc
+          echo "export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk" >> $HOME/.bashrc
+          
+          # 立即应用环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          
+          # 添加Java 17到PATH的开头
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
           
           # 验证Java版本
           echo "Java版本信息："
           java -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "ANDROID_HOME: $ANDROID_HOME"
           
           # 创建必要的目录
           mkdir -p /home/runner/.buildozer/android/platform
@@ -80,6 +97,10 @@ jobs:
       
       - name: Install buildozer and dependencies
         run: |
+          # 确保使用正确的Java版本
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
           pip3 install --upgrade pip
           pip3 install --upgrade cython
           pip3 install buildozer
@@ -88,11 +109,19 @@ jobs:
       - name: Copy modules
         working-directory: mobile_app
         run: |
+          # 确保使用正确的Java版本
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
           python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
       
       - name: Prepare build environment
         working-directory: mobile_app
         run: |
+          # 确保使用正确的Java版本
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
           # 检查buildozer.spec文件
           if [ ! -f buildozer.spec ]; then
             echo "错误：未找到buildozer.spec文件"
@@ -104,22 +133,48 @@ jobs:
           cat buildozer.spec
           echo "===================="
       
-      - name: Initialize Android SDK
+      - name: Setup Android SDK with command line tools
         run: |
-          # 安装Android命令行工具
+          # 确保使用正确的Java版本
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+          
+          # 下载并安装Android命令行工具
           cd /home/runner/.buildozer/android/platform
-          if [ ! -d "cmdline-tools" ]; then
+          
+          # 如果已经存在旧的tools目录，先备份
+          if [ -d "android-sdk/tools" ]; then
+            mv android-sdk/tools android-sdk/tools_backup
+          fi
+          
+          # 创建命令行工具目录
+          mkdir -p cmdline-tools/latest
+          cd cmdline-tools/latest
+          
+          # 下载命令行工具
+          if [ ! -f "commandlinetools-linux-9477386_latest.zip" ]; then
             echo "下载Android命令行工具..."
-            mkdir -p cmdline-tools/latest
-            cd cmdline-tools/latest
             wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
             unzip commandlinetools-linux-9477386_latest.zip
             rm commandlinetools-linux-9477386_latest.zip
           fi
           
-          # 使用正确的路径接受Android SDK许可
+          # 设置正确的权限
+          chmod +x bin/*
+          
+          # 接受Android SDK许可
           echo "接受Android SDK许可..."
-          yes | /home/runner/.buildozer/android/platform/cmdline-tools/latest/bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk --licenses || true
+          yes | ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk --licenses || true
+          
+          # 安装platform-tools
+          echo "安装platform-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platform-tools" || true
       
       - name: Build APK
         working-directory: mobile_app
@@ -127,9 +182,26 @@ jobs:
           echo "开始构建APK..."
           echo "构建类型: ${{ github.event.inputs.build_type }}"
           
+          # 强制设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          
           # 再次确认环境变量
           echo "JAVA_HOME: $JAVA_HOME"
           echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "PATH中的Java位置:"
+          which java
+          java -version
+          
+          # 验证Android SDK工具
+          if [ -f "/home/runner/.buildozer/android/platform/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "使用新的sdkmanager..."
+            /home/runner/.buildozer/android/platform/cmdline-tools/latest/bin/sdkmanager --version
+          else
+            echo "使用默认sdkmanager..."
+          fi
           
           # 设置超时时间
           timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
