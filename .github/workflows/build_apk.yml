@@ -276,28 +276,48 @@ jobs:
           # 创建兼容性链接：buildozer期望sdkmanager在tools/bin，但新版本在cmdline-tools/latest/bin
           echo "创建SDK工具兼容性链接..."
           mkdir -p "$ANDROID_SDK_ROOT/tools/bin"
+          mkdir -p "$ANDROID_SDK_ROOT/tools/lib"
           
-          # 创建符号链接指向实际的sdkmanager
-          if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" || {
-              # 如果符号链接失败，尝试复制
-              cp "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" || true
-            }
-            echo "✅ sdkmanager链接已创建"
+          # 检查cmdline-tools是否存在
+          if [ ! -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "❌ 错误：cmdline-tools未找到"
+            echo "SDK目录结构："
+            ls -la "$ANDROID_SDK_ROOT/" || true
+            exit 1
           fi
           
-          # 创建tools/lib目录的链接（如果需要）
+          # 创建包装脚本而不是符号链接（更可靠）
+          cat > "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" << 'SDKWRAPPER'
+#!/bin/bash
+# Wrapper script for sdkmanager
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
+SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
+SDKWRAPPER
+          
+          chmod +x "$ANDROID_SDK_ROOT/tools/bin/sdkmanager"
+          echo "✅ sdkmanager包装脚本已创建"
+          
+          # 复制lib目录（sdkmanager需要依赖库）
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/latest/lib" ]; then
-            ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/lib" "$ANDROID_SDK_ROOT/tools/lib" || true
+            cp -r "$ANDROID_SDK_ROOT/cmdline-tools/latest/lib"/* "$ANDROID_SDK_ROOT/tools/lib/" 2>/dev/null || true
+            echo "✅ lib目录已复制"
           fi
           
-          # 验证sdkmanager在期望的位置
-          if [ -f "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" ]; then
-            echo "✅ sdkmanager在buildozer期望的位置可用"
-            "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version || true
+          # 验证sdkmanager是否能正常运行
+          echo "测试sdkmanager..."
+          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
+          if "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version > /dev/null 2>&1; then
+            echo "✅ sdkmanager测试成功"
+            "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version | head -n 3
           else
-            echo "⚠️  警告：无法创建sdkmanager链接"
+            echo "⚠️  sdkmanager测试失败，但继续构建"
+            echo "尝试直接调用cmdline-tools版本..."
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version | head -n 3 || true
           fi
+          
+          # 确保tools/bin目录在PATH中
+          export PATH="$ANDROID_SDK_ROOT/tools/bin:$PATH"
           
           echo "✅ Android SDK组件安装完成"
       
