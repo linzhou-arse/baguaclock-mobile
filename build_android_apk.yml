@@ -11,6 +11,14 @@ on:
         options:
           - debug
           - release
+      clean_build:
+        description: '清理构建环境'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
   build:
@@ -19,13 +27,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
       
       - name: Install system dependencies
         run: |
@@ -36,7 +48,6 @@ jobs:
             build-essential \
             git \
             unzip \
-            openjdk-11-jdk \
             libffi-dev \
             libssl-dev \
             zlib1g-dev \
@@ -46,39 +57,92 @@ jobs:
             libsqlite3-dev \
             liblzma-dev
       
-      - name: Install buildozer
+      - name: Set up environment variables
+        run: |
+          echo "ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+      
+      - name: Clean build environment
+        if: ${{ github.event.inputs.clean_build == 'true' }}
+        working-directory: mobile_app
+        run: |
+          rm -rf .buildozer
+          echo "清理完成"
+      
+      - name: Install buildozer and dependencies
         run: |
           pip3 install --upgrade pip
+          pip3 install --upgrade cython
           pip3 install buildozer
-          pip3 install cython
+          echo "Buildozer安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
         run: |
           python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
       
+      - name: Prepare build environment
+        working-directory: mobile_app
+        run: |
+          # 检查buildozer.spec文件
+          if [ ! -f buildozer.spec ]; then
+            echo "错误：未找到buildozer.spec文件"
+            exit 1
+          fi
+          
+          # 显示buildozer配置
+          echo "=== Buildozer配置 ==="
+          cat buildozer.spec
+          echo "===================="
+      
       - name: Build APK
         working-directory: mobile_app
-        env:
-          ANDROIDSDK: ${{ secrets.ANDROIDSDK }}
         run: |
-          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-            buildozer android release
-          else
-            buildozer android debug
+          echo "开始构建APK..."
+          echo "构建类型: ${{ github.event.inputs.build_type }}"
+          
+          # 设置超时时间
+          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          
+          if [ "$BUILD_FAILED" = "true" ]; then
+            echo "构建失败，尝试重新构建..."
+            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
           fi
+          
+          echo "APK构建完成"
+      
+      - name: Check build results
+        working-directory: mobile_app
+        run: |
+          echo "=== 检查构建结果 ==="
+          if [ -d "bin" ]; then
+            echo "bin目录内容:"
+            ls -la bin/
+          else
+            echo "未找到bin目录"
+          fi
+          
+          if [ -d ".buildozer" ]; then
+            echo ".buildozer目录内容:"
+            ls -la .buildozer/
+          fi
+          
+          echo "=================="
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: apk-file
-          path: mobile_app/bin/*.apk
+          name: apk-file-${{ github.event.inputs.build_type }}
+          path: |
+            mobile_app/bin/*.apk
+            mobile_app/bin/*.aab
           retention-days: 30
       
-      - name: Upload build log
-        if: failure()
+      - name: Upload build logs
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: build-log
-          path: mobile_app/.buildozer/
-          retention-days: 7
+          name: build-logs
+          path: |
+            mobil
