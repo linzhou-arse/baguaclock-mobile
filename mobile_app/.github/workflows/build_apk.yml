@@ -26,12 +26,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
       
@@ -127,7 +125,7 @@ jobs:
           echo "=================="
       
       - name: Upload APK
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: apk-file-${{ github.event.inputs.build_type }}
@@ -137,7 +135,7 @@ jobs:
           retention-days: 30
       
       - name: Upload build logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: build-logs
