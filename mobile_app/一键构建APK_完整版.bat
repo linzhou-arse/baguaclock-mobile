@@ -44,7 +44,7 @@ if not errorlevel 1 (
 
 REM 检测buildozer（在WSL中）
 if !HAS_WSL! equ 1 (
-    wsl bash -c "command -v buildozer" >nul 2>&1
+    wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && command -v buildozer || python3 -m buildozer --version >/dev/null 2>&1" >nul 2>&1
     if not errorlevel 1 (
         set HAS_BUILDOZER=1
         echo ✅ Buildozer已安装（WSL中）
@@ -111,10 +111,14 @@ echo [2/4] 检查buildozer...
 if !HAS_BUILDOZER! equ 0 (
     echo ⚠️  Buildozer未安装，正在安装...
     echo 这可能需要几分钟...
-    wsl bash -c "sudo apt-get update && sudo apt-get install -y python3-pip && pip3 install buildozer"
+    echo.
+    echo [注意] Python 3.12需要特殊参数，正在使用兼容模式安装...
+    wsl bash -c "sudo apt-get update && sudo apt-get install -y python3-pip python3-dev build-essential && python3 -m pip install --break-system-packages buildozer cython"
     if errorlevel 1 (
         echo ❌ Buildozer安装失败
-        echo 请手动在WSL中安装：pip3 install buildozer
+        echo.
+        echo 请手动在WSL中安装：
+        echo   python3 -m pip install --break-system-packages buildozer cython
         pause
         exit /b 1
     )
@@ -160,19 +164,20 @@ echo - 请确保网络连接正常
 echo - 构建过程中请勿关闭此窗口
 echo.
 
+REM 设置PATH确保能找到buildozer
 if exist "build_android.sh" (
     echo 使用构建脚本...
     if "%build_type%"=="2" (
-        wsl bash -c "cd '!WSL_DIR!' && bash -c 'BUILD_TYPE=release bash build_android.sh'"
+        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash -c 'BUILD_TYPE=release bash build_android.sh'"
     ) else (
-        wsl bash -c "cd '!WSL_DIR!' && bash build_android.sh"
+        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && bash build_android.sh"
     )
 ) else (
     echo 直接使用buildozer...
     if "%build_type%"=="2" (
-        wsl bash -c "cd '!WSL_DIR!' && buildozer android release"
+        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android release"
     ) else (
-        wsl bash -c "cd '!WSL_DIR!' && buildozer android debug"
+        wsl bash -c "export PATH=\$HOME/.local/bin:\$PATH && cd '!WSL_DIR!' && buildozer android debug"
     )
 )
 

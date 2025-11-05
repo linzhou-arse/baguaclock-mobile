@@ -40,16 +40,27 @@ echo
 echo "[2/4] 检查buildozer..."
 if ! python3 -c "import buildozer" 2>/dev/null; then
     echo "⚠️  buildozer未安装，正在安装..."
-    pip3 install buildozer
+    # Python 3.12需要特殊参数
+    python3 -m pip install --break-system-packages buildozer cython
     if [ $? -ne 0 ]; then
         echo "❌ buildozer安装失败"
-        echo "请手动运行：pip3 install buildozer"
+        echo "请手动运行：python3 -m pip install --break-system-packages buildozer cython"
         exit 1
     fi
     echo "✅ buildozer安装完成"
 else
     echo "✅ buildozer已安装"
-    buildozer --version
+    # 尝试使用buildozer命令，如果失败则使用python3 -m buildozer
+    if command -v buildozer >/dev/null 2>&1; then
+        buildozer --version
+    else
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v buildozer >/dev/null 2>&1; then
+            buildozer --version
+        else
+            python3 -m buildozer --version
+        fi
+    fi
 fi
 echo
 
@@ -94,18 +105,25 @@ echo
 # 选择构建类型
 build_type=${BUILD_TYPE:-debug}
 
+# 确保能找到buildozer
+export PATH="$HOME/.local/bin:$PATH"
+BUILDOZER_CMD="buildozer"
+if ! command -v buildozer >/dev/null 2>&1; then
+    BUILDOZER_CMD="python3 -m buildozer"
+fi
+
 if [ "$build_type" = "release" ] || [ "$build_type" = "2" ]; then
     echo
     echo "开始构建Release版本APK..."
     echo "[注意] Release版本需要签名，可能需要更长时间"
     echo
-    buildozer android release
+    $BUILDOZER_CMD android release
     build_result=$?
 else
     echo
     echo "开始构建Debug版本APK..."
     echo
-    buildozer android debug
+    $BUILDOZER_CMD android debug
     build_result=$?
 fi
 
