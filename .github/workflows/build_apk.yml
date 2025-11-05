@@ -288,12 +288,12 @@ jobs:
           
           # 创建包装脚本而不是符号链接（更可靠）
           cat > "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" << 'SDKWRAPPER'
-#!/bin/bash
-# Wrapper script for sdkmanager
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
-SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
-SDKWRAPPER
+          #!/bin/bash
+          # Wrapper script for sdkmanager
+          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
+          SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+          exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
+          SDKWRAPPER
           
           chmod +x "$ANDROID_SDK_ROOT/tools/bin/sdkmanager"
           echo "✅ sdkmanager包装脚本已创建"
