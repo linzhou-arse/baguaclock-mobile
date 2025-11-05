@@ -337,6 +337,10 @@ jobs:
           export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
           export ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
           
+          # 确保使用Java 17（sdkmanager需要）
+          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
           # 验证SDK和许可文件存在
           echo "验证Android SDK环境..."
           echo "ANDROID_HOME: $ANDROID_HOME"
