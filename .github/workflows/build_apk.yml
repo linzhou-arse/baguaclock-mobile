@@ -95,6 +95,31 @@ jobs:
           cat buildozer.spec
           echo "===================="
       
+      - name: Install expect for license acceptance
+        run: |
+          sudo apt-get install -y expect
+      
+      - name: Setup Android SDK license acceptance
+        run: |
+          echo "=========================================="
+          echo "设置Android SDK许可自动接受"
+          echo "=========================================="
+          
+          # 创建expect脚本来自动接受许可
+          cat > accept_android_licenses.exp << 'EOF'
+          #!/usr/bin/expect -f
+          set timeout -1
+          spawn sdkmanager --licenses
+          expect {
+              "Accept? (y/N):" { send "y\r"; exp_continue }
+              eof
+          }
+          EOF
+          chmod +x accept_android_licenses.exp
+          
+          # 这个脚本将在buildozer下载SDK后使用
+          echo "✅ 许可接受脚本已创建"
+      
       - name: Build APK
         working-directory: mobile_app
         run: |
@@ -103,18 +128,64 @@ jobs:
           echo "构建类型: ${{ github.event.inputs.build_type }}"
           echo "=========================================="
           
+          # buildozer会在其自己的目录中管理SDK
+          # 设置环境变量指向buildozer的SDK目录
+          export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
+          export ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+          
+          # 创建wrapper脚本来处理许可接受
+          cat > build_with_licenses.sh << 'SCRIPT'
+          #!/bin/bash
+          # Wrapper脚本：自动接受Android SDK许可并构建
+          
+          # 函数：接受许可
+          accept_licenses() {
+            local sdk_path="$HOME/.buildozer/android/platform/android-sdk"
+            if [ -f "$sdk_path/cmdline-tools/latest/bin/sdkmanager" ]; then
+              echo "接受Android SDK许可..."
+              yes | "$sdk_path/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+            fi
+          }
+          
+          # 首次尝试接受许可
+          accept_licenses
+          
+          # 运行构建命令
+          if [ "$1" = "release" ]; then
+            buildozer android release 2>&1 | tee build.log
+          else
+            buildozer android debug 2>&1 | tee build.log
+          fi
+          
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          
+          # 如果构建失败且日志显示许可问题，再次接受许可并重试
+          if [ $BUILD_EXIT_CODE -ne 0 ] && grep -q "license.*not accepted\|Accept? (y/N)" build.log 2>/dev/null; then
+            echo "检测到许可问题，重新接受许可并重试..."
+            accept_licenses
+            sleep 2
+            
+            if [ "$1" = "release" ]; then
+              buildozer android release 2>&1 | tee -a build.log
+            else
+              buildozer android debug 2>&1 | tee -a build.log
+            fi
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          fi
+          
+          exit $BUILD_EXIT_CODE
+          SCRIPT
+          
+          chmod +x build_with_licenses.sh
+          
           # 设置构建超时（30分钟）
           # buildozer会自动下载所需的Android SDK和NDK
           # 首次构建可能需要较长时间（10-30分钟）
           set +e  # 不立即退出，先捕获错误
           
-          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-            buildozer android release 2>&1 | tee build.log
-            BUILD_EXIT_CODE=${PIPESTATUS[0]}
-          else
-            buildozer android debug 2>&1 | tee build.log
-            BUILD_EXIT_CODE=${PIPESTATUS[0]}
-          fi
+          # 使用wrapper脚本构建
+          ./build_with_licenses.sh "${{ github.event.inputs.build_type }}"
+          BUILD_EXIT_CODE=$?
           
           set -e  # 恢复错误退出
           
