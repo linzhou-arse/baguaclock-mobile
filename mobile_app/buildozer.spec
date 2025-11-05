@@ -38,7 +38,7 @@ android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 android.minapi = 21
 
 # Android目标版本
-android.targetapi = 33
+android.targetapi = 31
 
 # Android架构
 android.archs = arm64-v8a,armeabi-v7a
@@ -69,3 +69,6 @@ log_level = 2
 # 是否显示警告
 # warn_on_root = 1
 
+# 国内镜像源配置
+p4a.bootstrap = sdl2
+p4a.local_recipes = ./p4a-recipes
