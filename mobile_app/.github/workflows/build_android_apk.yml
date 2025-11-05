@@ -1,0 +1,145 @@
+name: Build Android APK New
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+      clean_build:
+        description: '清理构建环境'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-pip \
+            python3-dev \
+            build-essential \
+            git \
+            unzip \
+            openjdk-11-jdk \
+            libffi-dev \
+            libssl-dev \
+            zlib1g-dev \
+            libncurses5-dev \
+            libbz2-dev \
+            libreadline-dev \
+            libsqlite3-dev \
+            liblzma-dev
+      
+      - name: Set up environment variables
+        run: |
+          echo "ANDROID_HOME=/usr/lib/android-sdk" >> $GITHUB_ENV
+          echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
+      
+      - name: Clean build environment
+        if: ${{ github.event.inputs.clean_build == 'true' }}
+        working-directory: mobile_app
+        run: |
+          rm -rf .buildozer
+          echo "清理完成"
+      
+      - name: Install buildozer and dependencies
+        run: |
+          pip3 install --upgrade pip
+          pip3 install --upgrade cython
+          pip3 install buildozer
+          echo "Buildozer安装完成"
+      
+      - name: Copy modules
+        working-directory: mobile_app
+        run: |
+          python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
+      
+      - name: Prepare build environment
+        working-directory: mobile_app
+        run: |
+          # 检查buildozer.spec文件
+          if [ ! -f buildozer.spec ]; then
+            echo "错误：未找到buildozer.spec文件"
+            exit 1
+          fi
+          
+          # 显示buildozer配置
+          echo "=== Buildozer配置 ==="
+          cat buildozer.spec
+          echo "===================="
+      
+      - name: Build APK
+        working-directory: mobile_app
+        run: |
+          echo "开始构建APK..."
+          echo "构建类型: ${{ github.event.inputs.build_type }}"
+          
+          # 设置超时时间
+          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          
+          if [ "$BUILD_FAILED" = "true" ]; then
+            echo "构建失败，尝试重新构建..."
+            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
+          fi
+          
+          echo "APK构建完成"
+      
+      - name: Check build results
+        working-directory: mobile_app
+        run: |
+          echo "=== 检查构建结果 ==="
+          if [ -d "bin" ]; then
+            echo "bin目录内容:"
+            ls -la bin/
+          else
+            echo "未找到bin目录"
+          fi
+          
+          if [ -d ".buildozer" ]; then
+            echo ".buildozer目录内容:"
+            ls -la .buildozer/
+          fi
+          
+          echo "=================="
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apk-file-${{ github.event.inputs.build_type }}
+          path: |
+            mobile_app/bin/*.apk
+            mobile_app/bin/*.aab
+          retention-days: 30
+      
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs
+          path: |
+            mobile_app/.buildozer/**/*.log
+            mobile_app/.buildozer/android/platform/build-*/dists/*/build.log
+          retention-days: 7
