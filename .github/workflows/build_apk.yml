@@ -70,16 +70,21 @@ jobs:
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apk-file
           path: mobile_app/bin/*.apk
+          if-no-files-found: warn
           retention-days: 30
       
       - name: Upload build log
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: mobile_app/.buildozer/
+          path: |
+            mobile_app/.buildozer/**/*.log
+            mobile_app/.buildozer/android/platform/build-*/dists/*/build.log
+          if-no-files-found: warn
           retention-days: 7
 
