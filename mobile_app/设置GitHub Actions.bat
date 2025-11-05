@@ -120,7 +120,7 @@ if not exist ".github\workflows\build_apk.yml" (
         echo     
         echo     steps:
         echo       - name: Checkout code
-        echo         uses: actions/checkout@v3
+        echo         uses: actions/checkout@v4
         echo         with:
         echo           fetch-depth: 0
         echo       
@@ -171,7 +171,7 @@ if not exist ".github\workflows\build_apk.yml" (
         echo           fi
         echo       
         echo       - name: Upload APK
-        echo         uses: actions/upload-artifact@v3
+        echo         uses: actions/upload-artifact@v4
         echo         with:
         echo           name: apk-file
         echo           path: mobile_app/bin/*.apk
@@ -179,7 +179,7 @@ if not exist ".github\workflows\build_apk.yml" (
         echo       
         echo       - name: Upload build log
         echo         if: failure()
-        echo         uses: actions/upload-artifact@v3
+        echo         uses: actions/upload-artifact@v4
         echo         with:
         echo           name: build-log
         echo           path: mobile_app/.buildozer/
