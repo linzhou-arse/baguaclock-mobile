@@ -36,7 +36,7 @@ jobs:
             build-essential \
             git \
             unzip \
-            openjdk-11-jdk \
+            openjdk-17-jdk \
             libffi-dev \
             libssl-dev \
             zlib1g-dev \
@@ -48,7 +48,8 @@ jobs:
       
       - name: Set up environment variables
         run: |
-          echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
+          # sdkmanager需要Java 17或更高版本
+          echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
           echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
       
       - name: Install buildozer and dependencies
@@ -287,10 +288,12 @@ jobs:
           fi
           
           # 创建包装脚本而不是符号链接（更可靠）
+          # sdkmanager需要Java 17或更高版本
           cat > "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" << 'SDKWRAPPER'
           #!/bin/bash
           # Wrapper script for sdkmanager
-          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
+          # sdkmanager需要Java 17或更高版本（class file version 61.0）
+          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
           SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
           exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
           SDKWRAPPER
@@ -306,7 +309,8 @@ jobs:
           
           # 验证sdkmanager是否能正常运行
           echo "测试sdkmanager..."
-          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-11-openjdk-amd64}"
+          # 确保使用Java 17
+          export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
           if "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version > /dev/null 2>&1; then
             echo "✅ sdkmanager测试成功"
             "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --version | head -n 3
