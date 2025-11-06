@@ -149,6 +149,29 @@ jobs:
           echo "安装platform-tools..."
           ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platform-tools" || true
       
+      - name: Update buildozer.spec for compatibility
+        working-directory: mobile_app
+        run: |
+          # 更新buildozer.spec文件以解决依赖版本兼容性问题
+          echo "更新buildozer.spec文件以解决依赖版本兼容性问题..."
+          
+          # 备份原始文件
+          cp buildozer.spec buildozer.spec.backup
+          
+          # 更新依赖版本以提高兼容性
+          sed -i 's/kivy==2.1.0/kivy==2.2.1/g' buildozer.spec
+          sed -i 's/kivymd==1.1.0/kivymd==1.1.1/g' buildozer.spec
+          
+          # 添加额外的构建选项以提高稳定性
+          if ! grep -q "p4a.branch = develop" buildozer.spec; then
+            echo "p4a.branch = develop" >> buildozer.spec
+          fi
+          
+          # 显示更新后的配置
+          echo "=== 更新后的Buildozer配置 ==="
+          cat buildozer.spec
+          echo "============================"
+      
       - name: Build APK
         working-directory: mobile_app
         run: |
@@ -176,12 +199,17 @@ jobs:
             echo "使用默认sdkmanager..."
           fi
           
+          # 清理之前的构建
+          echo "清理之前的构建..."
+          rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+          
           # 设置超时时间
-          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          echo "开始构建过程..."
+          timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
           
           if [ "$BUILD_FAILED" = "true" ]; then
             echo "构建失败，尝试重新构建..."
-            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
+            timeout 3600 buildozer android ${{ github.event.inputs.build_type }}
           fi
           
           echo "APK构建完成"
