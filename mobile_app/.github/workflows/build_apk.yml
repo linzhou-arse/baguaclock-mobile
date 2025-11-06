@@ -49,7 +49,14 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             libsqlite3-dev \
-            liblzma-dev
+            liblzma-dev \
+            libgtk-3-dev \
+            libharfbuzz-dev \
+            libfreetype6-dev \
+            libffi-dev \
+            libcairo2-dev \
+            libgirepository1.0-dev \
+            libpango1.0-dev
       
       - name: Set up environment variables
         run: |
@@ -66,8 +73,9 @@ jobs:
         run: |
           pip3 install --upgrade pip
           pip3 install --upgrade cython
-          pip3 install buildozer
-          echo "Buildozer安装完成"
+          pip3 install --upgrade buildozer
+          pip3 install --upgrade python-for-android
+          echo "Buildozer和Python-for-Android安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
@@ -159,18 +167,45 @@ jobs:
           cp buildozer.spec buildozer.spec.backup
           
           # 更新依赖版本以提高兼容性
-          sed -i 's/kivy==2.1.0/kivy==2.2.1/g' buildozer.spec
+          sed -i 's/kivy==2.1.0/kivy==2.3.0/g' buildozer.spec
           sed -i 's/kivymd==1.1.0/kivymd==1.1.1/g' buildozer.spec
           
           # 添加额外的构建选项以提高稳定性
           if ! grep -q "p4a.branch = develop" buildozer.spec; then
+            echo "" >> buildozer.spec
+            echo "# 使用开发分支以获得最新修复" >> buildozer.spec
             echo "p4a.branch = develop" >> buildozer.spec
+          fi
+          
+          # 添加SDL2相关配置
+          if ! grep -q "p4a.bootstrap = sdl2" buildozer.spec; then
+            echo "" >> buildozer.spec
+            echo "# SDL2引导程序配置" >> buildozer.spec
+            echo "p4a.bootstrap = sdl2" >> buildozer.spec
+          fi
+          
+          # 添加NDK API版本
+          if ! grep -q "android.ndk_api" buildozer.spec; then
+            echo "" >> buildozer.spec
+            echo "# NDK API版本" >> buildozer.spec
+            echo "android.ndk_api = 21" >> buildozer.spec
           fi
           
           # 显示更新后的配置
           echo "=== 更新后的Buildozer配置 ==="
           cat buildozer.spec
           echo "============================"
+      
+      - name: Pre-install Python-for-Android dependencies
+        working-directory: mobile_app
+        run: |
+          # 预安装Python-for-Android依赖以提高构建稳定性
+          echo "预安装Python-for-Android依赖..."
+          pip3 install --upgrade Pillow
+          pip3 install --upgrade pyjnius
+          pip3 install --upgrade plyer
+          pip3 install --upgrade requests
+          echo "依赖安装完成"
       
       - name: Build APK
         working-directory: mobile_app
@@ -202,6 +237,7 @@ jobs:
           # 清理之前的构建
           echo "清理之前的构建..."
           rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+          rm -rf .buildozer/android/platform/build-*
           
           # 设置超时时间
           echo "开始构建过程..."
