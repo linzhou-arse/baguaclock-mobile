@@ -167,8 +167,8 @@ jobs:
           cp buildozer.spec buildozer.spec.backup
           
           # 更新依赖版本以提高兼容性
-          sed -i 's/kivy==2.1.0/kivy==2.3.0/g' buildozer.spec
-          sed -i 's/kivymd==1.1.0/kivymd==1.1.1/g' buildozer.spec
+          sed -i 's/kivy==2.3.0/kivy==2.2.1/g' buildozer.spec
+          sed -i 's/kivymd==1.1.1/kivymd==1.1.1/g' buildozer.spec
           
           # 添加额外的构建选项以提高稳定性
           if ! grep -q "p4a.branch = develop" buildozer.spec; then
@@ -177,18 +177,18 @@ jobs:
             echo "p4a.branch = develop" >> buildozer.spec
           fi
           
-          # 添加SDL2相关配置
-          if ! grep -q "p4a.bootstrap = sdl2" buildozer.spec; then
+          # 添加NDK版本配置
+          if ! grep -q "android.ndk" buildozer.spec; then
             echo "" >> buildozer.spec
-            echo "# SDL2引导程序配置" >> buildozer.spec
-            echo "p4a.bootstrap = sdl2" >> buildozer.spec
+            echo "# NDK版本" >> buildozer.spec
+            echo "android.ndk = 25b" >> buildozer.spec
           fi
           
-          # 添加NDK API版本
-          if ! grep -q "android.ndk_api" buildozer.spec; then
+          # 添加API版本配置
+          if ! grep -q "android.api" buildozer.spec; then
             echo "" >> buildozer.spec
-            echo "# NDK API版本" >> buildozer.spec
-            echo "android.ndk_api = 21" >> buildozer.spec
+            echo "# Android API版本" >> buildozer.spec
+            echo "android.api = 31" >> buildozer.spec
           fi
           
           # 显示更新后的配置
