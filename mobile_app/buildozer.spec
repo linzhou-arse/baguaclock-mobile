@@ -44,7 +44,7 @@ android.targetapi = 31
 android.archs = arm64-v8a,armeabi-v7a
 
 # Python依赖
-requirements = python3,kivy==2.3.0,kivymd==1.1.1,plyer,pyjnius,requests
+requirements = python3,kivy==2.2.1,kivymd==1.1.1,plyer,pyjnius,requests
 
 # 应用方向
 orientation = portrait
@@ -75,6 +75,12 @@ p4a.local_recipes = ./p4a-recipes
 
 # 使用开发分支以获得最新修复
 p4a.branch = develop
+
+# NDK版本
+android.ndk = 25b
+
+# Android API版本
+android.api = 31
 
 # NDK API版本
 android.ndk_api = 21
