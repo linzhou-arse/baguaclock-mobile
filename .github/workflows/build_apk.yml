@@ -510,15 +510,51 @@ jobs:
           echo "ANDROIDSDK: $ANDROIDSDK"
           
           # 直接运行buildozer，捕获详细错误
+          # 使用临时文件来捕获退出代码
           if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-            buildozer android release 2>&1 | tee build.log || BUILD_EXIT_CODE=$?
+            buildozer android release 2>&1 | tee build.log
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
           else
-            buildozer android debug 2>&1 | tee build.log || BUILD_EXIT_CODE=$?
+            buildozer android debug 2>&1 | tee build.log
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
           fi
           
-          BUILD_EXIT_CODE=${BUILD_EXIT_CODE:-$?}
-          
           set -e  # 恢复错误退出
+          
+          # 检查构建是否真正成功：验证APK文件是否存在
+          echo ""
+          echo "=========================================="
+          echo "验证构建结果..."
+          echo "=========================================="
+          
+          APK_FOUND=0
+          if [ -d "bin" ]; then
+            echo "bin目录存在，检查APK文件..."
+            APK_FILES=$(find bin -name "*.apk" -o -name "*.aab" 2>/dev/null)
+            if [ -n "$APK_FILES" ]; then
+              echo "✅ 找到APK/AAB文件："
+              echo "$APK_FILES"
+              APK_FOUND=1
+            else
+              echo "⚠️  bin目录存在但没有APK/AAB文件"
+              ls -la bin/ || echo "无法列出bin目录内容"
+            fi
+          else
+            echo "⚠️  bin目录不存在"
+            # 检查.buildozer目录中是否有APK
+            DIST_APK=$(find .buildozer -name "*.apk" -o -name "*.aab" 2>/dev/null | head -n 1)
+            if [ -n "$DIST_APK" ]; then
+              echo "⚠️  在.buildozer目录找到APK，但未复制到bin目录："
+              echo "$DIST_APK"
+            fi
+          fi
+          
+          # 如果APK不存在，即使退出代码为0也视为失败
+          if [ $APK_FOUND -eq 0 ]; then
+            echo ""
+            echo "❌ 构建失败：未找到APK文件"
+            BUILD_EXIT_CODE=1
+          fi
           
           # 如果构建失败，检查是否是Java版本问题
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -577,9 +613,23 @@ jobs:
             exit $BUILD_EXIT_CODE
           fi
           
-          echo "=========================================="
-          echo "✅ 构建完成！"
-          echo "=========================================="
+          # 再次确认APK文件存在
+          if [ $APK_FOUND -eq 1 ]; then
+            echo ""
+            echo "=========================================="
+            echo "✅ 构建完成！APK文件已生成"
+            echo "=========================================="
+            echo "APK文件位置："
+            find bin -name "*.apk" -o -name "*.aab" 2>/dev/null | while read apk; do
+              echo "  - $apk ($(du -h "$apk" | cut -f1))"
+            done
+          else
+            echo ""
+            echo "=========================================="
+            echo "❌ 构建失败：未生成APK文件"
+            echo "=========================================="
+            exit 1
+          fi
       
       - name: Upload build log file
         if: always()
@@ -594,19 +644,68 @@ jobs:
         working-directory: mobile_app
         run: |
           echo "=== 检查构建结果 ==="
+          echo ""
+          
+          # 检查bin目录
           if [ -d "bin" ]; then
+            echo "✅ bin目录存在"
             echo "bin目录内容:"
-            ls -la bin/
+            ls -la bin/ || echo "无法列出bin目录"
+            
+            # 查找APK文件
+            APK_COUNT=$(find bin -name "*.apk" -o -name "*.aab" 2>/dev/null | wc -l)
+            if [ "$APK_COUNT" -gt 0 ]; then
+              echo ""
+              echo "✅ 找到 $APK_COUNT 个APK/AAB文件："
+              find bin -name "*.apk" -o -name "*.aab" 2>/dev/null | while read apk; do
+                echo "  - $apk ($(du -h "$apk" 2>/dev/null | cut -f1 || echo '未知大小'))"
+              done
+            else
+              echo ""
+              echo "⚠️  警告：bin目录中没有APK/AAB文件"
+            fi
           else
-            echo "未找到bin目录"
+            echo "❌ 未找到bin目录"
           fi
           
+          echo ""
+          echo "检查.buildozer目录..."
           if [ -d ".buildozer" ]; then
-            echo ".buildozer目录内容:"
-            ls -la .buildozer/
+            echo ".buildozer目录结构:"
+            find .buildozer -type d -maxdepth 2 2>/dev/null | head -n 20 || echo "无法列出.buildozer目录"
+            
+            # 检查是否有APK在.buildozer中
+            DIST_APK=$(find .buildozer -name "*.apk" -o -name "*.aab" 2>/dev/null | head -n 5)
+            if [ -n "$DIST_APK" ]; then
+              echo ""
+              echo "⚠️  在.buildozer目录找到APK文件（但未在bin目录）："
+              echo "$DIST_APK"
+            fi
           fi
           
+          echo ""
           echo "=================="
+      
+      - name: Find and copy APK files
+        working-directory: mobile_app
+        run: |
+          echo "=== 查找APK文件 ==="
+          # 确保bin目录存在
+          mkdir -p bin
+          
+          # 从.buildozer目录复制APK到bin目录（如果存在）
+          if [ -d ".buildozer" ]; then
+            echo "在.buildozer目录中查找APK文件..."
+            find .buildozer -name "*.apk" -o -name "*.aab" 2>/dev/null | while read apk; do
+              echo "找到APK: $apk"
+              cp "$apk" bin/ 2>/dev/null && echo "已复制到bin目录: $(basename "$apk")" || echo "复制失败: $apk"
+            done
+          fi
+          
+          # 显示最终结果
+          echo ""
+          echo "bin目录中的APK文件："
+          ls -lah bin/*.apk bin/*.aab 2>/dev/null || echo "未找到APK文件"
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -616,6 +715,8 @@ jobs:
           path: |
             mobile_app/bin/*.apk
             mobile_app/bin/*.aab
+            mobile_app/.buildozer/**/*.apk
+            mobile_app/.buildozer/**/*.aab
           if-no-files-found: warn
           retention-days: 30
       
