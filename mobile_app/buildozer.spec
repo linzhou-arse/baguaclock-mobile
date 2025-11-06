@@ -76,8 +76,5 @@ p4a.local_recipes = ./p4a-recipes
 # 使用开发分支以获得最新修复
 p4a.branch = develop
 
-# SDL2引导程序配置
-p4a.bootstrap = sdl2
-
 # NDK API版本
 android.ndk_api = 21
