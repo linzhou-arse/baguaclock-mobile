@@ -27,6 +27,12 @@ jobs:
         with:
           python-version: '3.9'
       
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -36,7 +42,6 @@ jobs:
             build-essential \
             git \
             unzip \
-            openjdk-11-jdk \
             libffi-dev \
             libssl-dev \
             zlib1g-dev \
@@ -46,39 +51,175 @@ jobs:
             libsqlite3-dev \
             liblzma-dev
       
-      - name: Install buildozer
+      - name: Set up environment variables
+        run: |
+          # 强制设置Java 17环境变量
+          echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+      
+      - name: Install buildozer and dependencies
         run: |
           pip3 install --upgrade pip
+          pip3 install --upgrade cython
           pip3 install buildozer
-          pip3 install cython
+          echo "Buildozer安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
         run: |
           python3 copy_modules.py || echo "模块复制可能有问题，继续构建"
       
+      - name: Prepare build environment
+        working-directory: mobile_app
+        run: |
+          # 检查buildozer.spec文件
+          if [ ! -f buildozer.spec ]; then
+            echo "❌ 错误：未找到buildozer.spec文件"
+            exit 1
+          fi
+          
+          # 检查图标文件
+          if [ ! -f icon.png ]; then
+            echo "⚠️  警告：未找到icon.png，创建默认图标..."
+            # 创建一个简单的1x1像素PNG图标（base64编码的最小PNG）
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > icon.png || echo "图标创建失败，继续构建"
+          fi
+          
+          # 检查main.py
+          if [ ! -f main.py ]; then
+            echo "❌ 错误：未找到main.py文件"
+            exit 1
+          fi
+          
+          # 显示目录结构
+          echo "=== 当前目录结构 ==="
+          ls -la
+          echo "===================="
+          
+          # 显示buildozer配置
+          echo "=== Buildozer配置 ==="
+          cat buildozer.spec
+          echo "===================="
+      
+      - name: Setup Android SDK with command line tools
+        run: |
+          # 设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+          
+          # 下载并安装Android命令行工具
+          cd /home/runner/.buildozer/android/platform
+          
+          # 如果已经存在旧的tools目录，先备份
+          if [ -d "android-sdk/tools" ]; then
+            mv android-sdk/tools android-sdk/tools_backup
+          fi
+          
+          # 创建命令行工具目录
+          mkdir -p cmdline-tools/latest
+          cd cmdline-tools/latest
+          
+          # 下载命令行工具
+          if [ ! -f "commandlinetools-linux-9477386_latest.zip" ]; then
+            echo "下载Android命令行工具..."
+            wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+            unzip commandlinetools-linux-9477386_latest.zip
+            rm commandlinetools-linux-9477386_latest.zip
+          fi
+          
+          # 设置正确的权限
+          chmod +x bin/*
+          
+          # 接受Android SDK许可
+          echo "接受Android SDK许可..."
+          yes | ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk --licenses || true
+          
+          # 安装platform-tools
+          echo "安装platform-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platform-tools" || true
+      
       - name: Build APK
         working-directory: mobile_app
-        env:
-          ANDROIDSDK: ${{ secrets.ANDROIDSDK }}
         run: |
-          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-            buildozer android release
+          echo "开始构建APK..."
+          echo "构建类型: ${{ github.event.inputs.build_type }}"
+          
+          # 强制设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          
+          # 再次确认环境变量
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "PATH中的Java位置:"
+          which java
+          java -version
+          
+          # 验证Android SDK工具
+          if [ -f "/home/runner/.buildozer/android/platform/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "使用新的sdkmanager..."
+            /home/runner/.buildozer/android/platform/cmdline-tools/latest/bin/sdkmanager --version
           else
-            buildozer android debug
+            echo "使用默认sdkmanager..."
           fi
+          
+          # 设置超时时间
+          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          
+          if [ "$BUILD_FAILED" = "true" ]; then
+            echo "构建失败，尝试重新构建..."
+            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
+          fi
+          
+          echo "APK构建完成"
+      
+      - name: Check build results
+        working-directory: mobile_app
+        run: |
+          echo "=== 检查构建结果 ==="
+          if [ -d "bin" ]; then
+            echo "bin目录内容:"
+            ls -la bin/
+          else
+            echo "未找到bin目录"
+          fi
+          
+          if [ -d ".buildozer" ]; then
+            echo ".buildozer目录内容:"
+            ls -la .buildozer/
+          fi
+          
+          echo "=================="
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: apk-file
-          path: mobile_app/bin/*.apk
+          name: apk-file-${{ github.event.inputs.build_type }}
+          path: |
+            mobile_app/bin/*.apk
+            mobile_app/bin/*.aab
           retention-days: 30
       
-      - name: Upload build log
-        if: failure()
+      - name: Upload build logs
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: build-log
-          path: mobile_app/.buildozer/
+          name: build-logs
+          path: |
+            mobile_app/.buildozer/**/*.log
+            mobile_app/.buildozer/android/platform/build-*/dists/*/build.log
           retention-days: 7
