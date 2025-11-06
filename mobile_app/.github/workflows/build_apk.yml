@@ -166,9 +166,9 @@ jobs:
           # 备份原始文件
           cp buildozer.spec buildozer.spec.backup
           
-          # 更新依赖版本以提高兼容性
-          sed -i 's/kivy==2.3.0/kivy==2.2.1/g' buildozer.spec
-          sed -i 's/kivymd==1.1.1/kivymd==1.1.1/g' buildozer.spec
+          # 强制更新依赖版本以提高兼容性
+          sed -i 's/kivy==2\.[0-9]\+\.[0-9]\+/kivy==2.2.1/g' buildozer.spec
+          sed -i 's/kivymd==1\.[0-9]\+\.[0-9]\+/kivymd==1.1.1/g' buildozer.spec
           
           # 添加额外的构建选项以提高稳定性
           if ! grep -q "p4a.branch = develop" buildozer.spec; then
