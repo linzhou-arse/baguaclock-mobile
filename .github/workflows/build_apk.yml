@@ -44,7 +44,11 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             libsqlite3-dev \
-            liblzma-dev
+            liblzma-dev \
+            wget \
+            curl \
+            file \
+            patchelf
       
       - name: Set up environment variables
         run: |
@@ -61,6 +65,7 @@ jobs:
           pip3 install --upgrade pip
           pip3 install --upgrade cython
           pip3 install buildozer
+          pip3 install python-for-android
           echo "Buildozer安装完成"
       
       - name: Copy modules
@@ -284,6 +289,7 @@ jobs:
             "platforms;android-31" \
             "platform-tools" \
             "ndk;25.1.8937393" \
+            "platforms;android-21" \
             2>&1 | tee /tmp/sdk_install.log || {
             echo "⚠️  安装可能失败，查看日志..."
             tail -n 20 /tmp/sdk_install.log
@@ -492,25 +498,67 @@ jobs:
           # 确保wrapper脚本可执行
           chmod +x build_with_licenses.sh
           
+          # 设置构建环境变量
+          export ANDROIDNDK="$HOME/.buildozer/android/platform/android-ndk-r25b"
+          export ANDROIDSDK="$HOME/.buildozer/android/platform/android-sdk"
+          export ANDROIDAPI=31
+          export ANDROIDMINAPI=21
+          
           # 使用wrapper脚本构建（wrapper脚本会确保使用Java 17）
           echo "使用wrapper脚本构建，确保Java 17环境..."
-          ./build_with_licenses.sh "${{ github.event.inputs.build_type }}"
-          BUILD_EXIT_CODE=$?
+          echo "ANDROIDNDK: $ANDROIDNDK"
+          echo "ANDROIDSDK: $ANDROIDSDK"
+          
+          # 直接运行buildozer，捕获详细错误
+          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
+            buildozer android release 2>&1 | tee build.log || BUILD_EXIT_CODE=$?
+          else
+            buildozer android debug 2>&1 | tee build.log || BUILD_EXIT_CODE=$?
+          fi
+          
+          BUILD_EXIT_CODE=${BUILD_EXIT_CODE:-$?}
           
           set -e  # 恢复错误退出
           
           # 如果构建失败，检查是否是Java版本问题
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
-            echo "检查Java环境..."
+            echo "=========================================="
+            echo "构建失败，检查环境..."
+            echo "=========================================="
             echo "当前JAVA_HOME: ${JAVA_HOME:-未设置}"
             java -version 2>&1 | head -n 3 || echo "无法执行java命令"
+            echo ""
+            echo "检查NDK..."
+            if [ -d "$ANDROIDNDK" ]; then
+              echo "✅ NDK目录存在: $ANDROIDNDK"
+              ls -la "$ANDROIDNDK" | head -n 5
+            else
+              echo "⚠️  NDK目录不存在: $ANDROIDNDK"
+            fi
+            echo ""
+            echo "检查SDK..."
+            if [ -d "$ANDROIDSDK" ]; then
+              echo "✅ SDK目录存在: $ANDROIDSDK"
+              ls -la "$ANDROIDSDK" | head -n 10
+            else
+              echo "⚠️  SDK目录不存在: $ANDROIDSDK"
+            fi
           fi
           
-          # 显示构建日志的最后100行
+          # 显示构建日志的最后200行（增加行数以查看更多错误信息）
           echo "=========================================="
-          echo "构建日志（最后100行）:"
+          echo "构建日志（最后200行）:"
           echo "=========================================="
-          tail -n 100 build.log || echo "无法读取构建日志"
+          tail -n 200 build.log || echo "无法读取构建日志"
+          
+          # 查找pythonforandroid相关的错误
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "查找pythonforandroid错误..."
+            echo "=========================================="
+            grep -i "pythonforandroid\|toolchain\|error\|exception\|traceback" build.log | tail -n 50 || echo "未找到相关错误"
+          fi
           
           # 如果构建失败，显示错误信息
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
