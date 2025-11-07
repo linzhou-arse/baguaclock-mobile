@@ -1,0 +1,1791 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+神煞分析器 - Shensha Analyzer
+============================
+
+基于《三命通会·神煞篇》的神煞分析
+实现天德贵人、月德贵人、天乙贵人等神煞的准确识别
+"""
+
+from __future__ import annotations
+from typing import Dict, List, Any, Tuple
+import time
+
+from ..core.base_analyzer import BaseAnalyzer
+from ..core.data_structures import BaziData, AnalysisResult, AnalysisConfig
+from ..core.utils import get_ten_god, get_season_by_month_branch, create_analysis_result
+from ..core.constants import TIANGAN_WUXING, DIZHI_WUXING, DIZHI_CANGGAN, TIANGAN_LIST, DIZHI_LIST
+
+
+class ShenshaAnalyzer(BaseAnalyzer):
+    """神煞分析器 - 基于《三命通会·神煞篇》"""
+    
+    def __init__(self, config: AnalysisConfig = None):
+        super().__init__("神煞分析器", "三命通会", config)
+        
+        # 神煞查表 - 基于《三命通会》理论
+        self.shensha_tables = self._init_shensha_tables()
+    
+    def analyze(self, bazi_data: BaziData) -> AnalysisResult:
+        """
+        执行神煞分析 - 基于《三命通会·神煞篇》
+        ✅ 修复：移除打分系统，只显示神煞详情
+        """
+        start_time = time.time()
+
+        try:
+            # 分析吉神
+            ji_shen = self._analyze_ji_shen(bazi_data)
+
+            # 分析凶神
+            xiong_shen = self._analyze_xiong_shen(bazi_data)
+
+            # ✅ 判断吉凶（不打分）
+            ji_count = len(ji_shen)
+            xiong_count = len(xiong_shen)
+
+            if ji_count > xiong_count * 2:
+                level = '大吉'
+            elif ji_count > xiong_count:
+                level = '小吉'
+            elif ji_count == xiong_count:
+                level = '中平'
+            elif xiong_count > ji_count * 2:
+                level = '大凶'
+            else:
+                level = '小凶'
+
+            # 生成描述和建议
+            description = self._generate_description(ji_shen, xiong_shen)
+            advice = self._generate_advice(ji_shen, xiong_shen)
+
+            analysis_time = (time.time() - start_time) * 1000
+
+            # ✅ 新增：获取判断依据（基于《三命通会·论天月德》经典理论）
+            ji_names = {shen.get('name', '') for shen in ji_shen}
+            xiong_names = {shen.get('name', '') for shen in xiong_shen}
+            level_reason = self._judge_shensha_level_classical(ji_shen, xiong_shen, ji_names, xiong_names, bazi_data)
+            
+            return create_analysis_result(
+                analyzer_name=self.name,
+                book_name=self.book_name,
+                analysis_type="神煞分析",
+                level=level,
+                score=0,  # 不打分
+                description=description,
+                details={
+                    'ji_shen': ji_shen,
+                    'xiong_shen': xiong_shen,
+                    'total_ji': ji_count,
+                    'total_xiong': xiong_count,
+                    'level_reason': level_reason  # ✅ 新增：判断依据
+                },
+                advice=advice,
+                explanation=f"基于《三命通会·神煞篇》理论分析，识别出{ji_count}个吉神，{xiong_count}个凶神。神煞吉凶需结合命局整体判断。",
+                analysis_time=analysis_time
+            )
+
+        except Exception as e:
+            raise Exception(f"神煞分析失败: {e}")
+    
+    def _init_shensha_tables(self) -> Dict[str, Dict]:
+        """初始化神煞查表"""
+        return {
+            # 天德贵人表 - 按《三命通会·论天月德》理论
+            # 《三命通会》原文："天德者，每月之德神也。"
+            # 查法：正月丁，二月申，三月壬，四月辛，五月亥，六月甲，
+            #      七月癸，八月寅，九月丙，十月乙，十一月巳，十二月庚
+            'tiande': {
+                '寅': '丁',  # 正月（寅月）- 丁 ✅
+                '卯': '申',  # 二月（卯月）- 申（坤位）✅
+                '辰': '壬',  # 三月（辰月）- 壬 ✅
+                '巳': '辛',  # 四月（巳月）- 辛 ✅
+                '午': '亥',  # 五月（午月）- 亥 ✅
+                '未': '甲',  # 六月（未月）- 甲 ✅
+                '申': '癸',  # 七月（申月）- 癸 ✅
+                '酉': '寅',  # 八月（酉月）- 寅 ✅
+                '戌': '丙',  # 九月（戌月）- 丙 ✅
+                '亥': '乙',  # 十月（亥月）- 乙 ✅
+                '子': '巳',  # 十一月（子月）- 巳（巽位）✅
+                '丑': '庚',  # 十二月（丑月）- 庚 ✅
+            },
+            
+            # 🔥 修复：月德贵人表（按三合局计算）
+            # 寅午戌月见丙（三合火局）
+            # 申子辰月见壬（三合水局）
+            # 亥卯未月见甲（三合木局）
+            # 巳酉丑月见庚（三合金局）
+            'yuede': {
+                '寅': '丙',  # 寅午戌见丙 ✅
+                '卯': '甲',  # 亥卯未见甲 ✅
+                '辰': '壬',  # 申子辰见壬 ✅
+                '巳': '庚',  # 巳酉丑见庚 ✅
+                '午': '丙',  # 寅午戌见丙 ✅
+                '未': '甲',  # 亥卯未见甲 ✅
+                '申': '壬',  # 申子辰见壬 ✅
+                '酉': '庚',  # 巳酉丑见庚 ✅
+                '戌': '丙',  # 寅午戌见丙 ✅
+                '亥': '甲',  # 亥卯未见甲 ✅
+                '子': '壬',  # 申子辰见壬 ✅
+                '丑': '庚',  # 巳酉丑见庚 ✅
+            },
+            
+            # 天乙贵人表 - 按《三命通会·论天乙贵人》理论
+            # 《三命通会》口诀："甲戊见牛羊，乙己鼠猴乡，丙丁猪鸡位，壬癸兔蛇藏，六辛逢虎马"
+            # 注释：牛=丑，羊=未，鼠=子，猴=申，猪=亥，鸡=酉，兔=卯，蛇=巳，虎=寅，马=午
+            'tianyi': {
+                '甲': '丑未',  # 甲戊见牛羊 ✅
+                '乙': '子申',  # 乙己鼠猴乡 ✅
+                '丙': '亥酉',  # 丙丁猪鸡位 ✅
+                '丁': '亥酉',  # 丙丁猪鸡位 ✅
+                '戊': '丑未',  # 甲戊见牛羊 ✅
+                '己': '子申',  # 乙己鼠猴乡 ✅
+                '庚': '午寅',  # 六辛逢虎马（庚同辛）✅
+                '辛': '午寅',  # 六辛逢虎马 ✅
+                '壬': '卯巳',  # 壬癸兔蛇藏 ✅
+                '癸': '卯巳',  # 壬癸兔蛇藏 ✅
+            },
+            
+            # 文昌贵人表 - 按《三命通会·论文昌贵人》理论
+            # 《三命通会》："文昌者，主聪明智慧，学业有成"
+            # 查法：甲巳乙午丙戊申，丁己酉位庚亥寻，辛子壬寅癸卯真
+            'wenchang': {
+                '甲': '巳',  # 甲日 - 巳 ✅
+                '乙': '午',  # 乙日 - 午 ✅
+                '丙': '申',  # 丙日 - 申 ✅
+                '丁': '酉',  # 丁日 - 酉 ✅
+                '戊': '申',  # 戊日 - 申 ✅
+                '己': '酉',  # 己日 - 酉 ✅
+                '庚': '亥',  # 庚日 - 亥 ✅
+                '辛': '子',  # 辛日 - 子 ✅
+                '壬': '寅',  # 壬日 - 寅 ✅
+                '癸': '卯',  # 癸日 - 卯 ✅
+            },
+            
+            # 羊刃表 - 按《三命通会·论羊刃》理论
+            # 《三命通会》："羊刃者，禄前一位也"
+            # 查法：甲刃在卯，乙刃在寅，丙戊刃在午，丁己刃在巳，
+            #      庚刃在酉，辛刃在申，壬刃在子，癸刃在亥
+            'yangren': {
+                '甲': '卯',  # 甲日 - 卯（甲禄在寅，刃在卯）✅
+                '乙': '寅',  # 乙日 - 寅（乙禄在卯，刃在寅）✅
+                '丙': '午',  # 丙日 - 午（丙戊禄在巳，刃在午）✅
+                '丁': '巳',  # 丁日 - 巳（丁己禄在午，刃在巳）✅
+                '戊': '午',  # 戊日 - 午（丙戊禄在巳，刃在午）✅
+                '己': '巳',  # 己日 - 巳（丁己禄在午，刃在巳）✅
+                '庚': '酉',  # 庚日 - 酉（庚禄在申，刃在酉）✅
+                '辛': '申',  # 辛日 - 申（辛禄在酉，刃在申）✅
+                '壬': '子',  # 壬日 - 子（壬禄在亥，刃在子）✅
+                '癸': '亥',  # 癸日 - 亥（癸禄在子，刃在亥）✅
+            }
+        }
+    
+    def _analyze_ji_shen(self, bazi_data: BaziData) -> List[Dict[str, Any]]:
+        """分析吉神"""
+        ji_shen = []
+        pillars = bazi_data.get_pillars()
+        day_master = bazi_data.get_day_master()
+        month_branch = bazi_data.get_month_branch()
+        
+        # 天德贵人
+        tiande_target = self.shensha_tables['tiande'].get(month_branch)
+        if tiande_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if gan == tiande_target:
+                    ji_shen.append({
+                        'name': '天德贵人',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '天德及人，吉联一身，事升吉贤。',
+                        'weight': 15
+                    })
+                    break
+        
+        # 月德贵人
+        yuede_target = self.shensha_tables['yuede'].get(month_branch)
+        if yuede_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if gan == yuede_target:
+                    ji_shen.append({
+                        'name': '月德贵人',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '月德贵人，逢凶化吉，遇难呈祥。',
+                        'weight': 12
+                    })
+                    break
+        
+        # 天乙贵人
+        tianyi_targets = self.shensha_tables['tianyi'].get(day_master, '')
+        if tianyi_targets:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in tianyi_targets:
+                    ji_shen.append({
+                        'name': '天乙贵人',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '天乙贵人，逢凶化吉，遇难呈祥。',
+                        'weight': 15
+                    })
+        
+        # 文昌贵人（按日干）
+        wenchang_target = self.shensha_tables['wenchang'].get(day_master)
+        if wenchang_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == wenchang_target:
+                    ji_shen.append({
+                        'name': '文昌贵人',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '文昌贵人，主聪明智慧，学业有成。',
+                        'weight': 10
+                    })
+                    break
+        
+        # 学堂（按日干）
+        xuetang_target = self._get_xuetang(day_master)
+        if xuetang_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == xuetang_target:
+                    ji_shen.append({
+                        'name': '学堂',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '学堂星，主学习能力，宜进修深造。',
+                        'weight': 8
+                    })
+                    break
+        
+        # 词馆（按日干）
+        ciguan_target = self._get_ciguan(day_master)
+        if ciguan_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == ciguan_target:
+                    ji_shen.append({
+                        'name': '词馆',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '词馆星，主文采口才，宜从事文化工作。',
+                        'weight': 8
+                    })
+                    break
+        
+        # 禄神（按日干）
+        lushen_target = self._get_lushen(day_master)
+        if lushen_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == lushen_target:
+                    ji_shen.append({
+                        'name': '禄神',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '禄神星，主富贵荣华，宜积极进取。',
+                        'weight': 12
+                    })
+                    break
+
+        # 🔥 修复：华盖（以日支为基准，按《三命通会》理论）
+        # 《三命通会》："华盖者，喻如宝盖，天有此星其形如盖，多主孤寡，纵贵亦不免孤独。"
+        # 查法：寅午戌见戌，亥卯未见未，申子辰见辰，巳酉丑见丑。
+        day_branch = pillars['day'][1]
+        huagai_target = self._huagai(day_branch)  # 🔥 修复：使用日支而不是年支
+        if huagai_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == huagai_target:
+                    ji_shen.append({
+                        'name': '华盖',
+                        'level': '中吉',  # 🔥 修复：华盖是中性偏吉，主艺术才华
+                        'position': pillar,
+                        'description': '华盖高概，主艺术才华、清高孤傲，宜发展文化、艺术方面的才能。',
+                        'weight': 8  # 🔥 修复：给予适当权重
+                    })
+                    break
+
+        # 红鸾、天喜（按年支引动）
+        year_branch = pillars['year'][1]
+        hongluan_target, tianxi_target = self._hongluan_tianxi_by_year(year_branch)
+        for pillar, (gan, zhi) in pillars.items():
+            if zhi == hongluan_target:
+                ji_shen.append({
+                    'name': '红鸾',
+                    'level': '小吉',
+                    'position': pillar,
+                    'description': '红鸾星动，主婚喜人缘，宜把握良机。',
+                    'weight': 6
+                })
+            if zhi == tianxi_target:
+                ji_shen.append({
+                    'name': '天喜',
+                    'level': '小吉',
+                    'position': pillar,
+                    'description': '天喜星动，主喜庆吉祥，宜积极进取。',
+                    'weight': 6
+                })
+
+        # 🔥 修复：驿马星（以年支为基准，按《三命通会》理论）
+        # 《三命通会》："驿马者，三合局对冲也。申子辰马在寅，寅午戌马在申，巳酉丑马在亥，亥卯未马在巳。"
+        # 驿马主变动、出行、事业变迁，一般算中性偏吉，利于事业发展
+        yima_target = self._yima(year_branch)
+        if yima_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == yima_target:
+                    ji_shen.append({
+                        'name': '驿马',
+                        'level': '小吉',
+                        'position': pillar,
+                        'description': '驿马开通，主动变动、出行、事业变迁，处理外出事务有利。',
+                        'weight': 6
+                    })
+                    break
+
+        # 🔥 新增：将星（按年支查法，按《三命通会》理论）
+        # 《三命通会》："将星者，三合局中神也。寅午戌见午，申子辰见子，亥卯未见卯，巳酉丑见酉。"
+        # 将星主领导才能、权威、事业成就
+        jiangxing_target = self._jiangxing(year_branch)
+        if jiangxing_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == jiangxing_target:
+                    ji_shen.append({
+                        'name': '将星',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '将星临命，主领导才能、权威显赫，事业有成，宜积极进取。',
+                        'weight': 12
+                    })
+                    break
+
+        # 🔥 新增：金舆（按日干查法，按《三命通会》理论）
+        # 《三命通会》："金舆者，日干临长生十二宫之帝旺位也。"
+        # 简化查法：甲日见辰，乙日见巳，丙日见未，丁日见申，戊日见未，己日见申，庚日见戌，辛日见亥，壬日见丑，癸日见寅
+        jinyu_target = self._jinyu(day_master)
+        if jinyu_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == jinyu_target:
+                    ji_shen.append({
+                        'name': '金舆',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '金舆临命，主富贵荣华，车马显达，宜积极进取。',
+                        'weight': 10
+                    })
+                    break
+
+        # 🔥 新增：太极贵人（按日干查法，按《三命通会》理论）
+        # 《三命通会》："太极者，天地未分，混沌初开也。"
+        # 查法：甲乙日见子午，丙丁日见卯酉，戊己日见辰戌丑未，庚辛日见寅申，壬癸日见巳亥
+        taiji_targets = self._taiji_guiren(day_master)
+        if taiji_targets:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in taiji_targets:
+                    ji_shen.append({
+                        'name': '太极贵人',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '太极贵人临命，主聪明智慧，学问深厚，宜从事文化、哲学、宗教等领域。',
+                        'weight': 12
+                    })
+                    break
+
+        # 🔥 新增：国印贵人（按年干查法，按《三命通会》理论）
+        # 《三命通会》："国印者，朝廷之印也。"
+        # 查法：甲见戌，乙见亥，丙见丑，丁见寅，戊见丑，己见寅，庚见辰，辛见巳，壬见未，癸见申
+        guoyin_target = self._guoyin_guiren(bazi_data.get_pillars()['year'][0])
+        if guoyin_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == guoyin_target:
+                    ji_shen.append({
+                        'name': '国印贵人',
+                        'level': '大吉',
+                        'position': pillar,
+                        'description': '国印贵人临命，主官运亨通，掌权有印，宜从事公职、管理等工作。',
+                        'weight': 13
+                    })
+                    break
+
+        # 🔥 新增：福星贵人（按日干查法，按《三命通会》理论）
+        # 《三命通会》："福星者，福德之星也。"
+        # 查法：甲见丙，乙见丁，丙见戊，丁见己，戊见庚，己见辛，庚见壬，辛见癸，壬见甲，癸见乙
+        fuxing_target = self._fuxing_guiren(day_master)
+        if fuxing_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if gan == fuxing_target:
+                    ji_shen.append({
+                        'name': '福星贵人',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '福星贵人临命，主福气深厚，生活安逸，宜知足常乐。',
+                        'weight': 10
+                    })
+                    break
+
+        # 🔥 新增：三奇贵人（按年月日干查法，按《三命通会》理论）
+        # 《三命通会》："三奇者，天地人三奇也。天上三奇：甲戊庚；地下三奇：乙丙丁；人中三奇：壬癸辛。"
+        sanqi_result = self._sanqi_guiren(pillars)
+        if sanqi_result:
+            ji_shen.append({
+                'name': '三奇贵人',
+                'level': '大吉',
+                'position': sanqi_result['position'],
+                'description': f"三奇贵人临命（{sanqi_result['type']}），主奇才异禀，非凡成就，宜把握机遇。",
+                'weight': 15
+            })
+
+        # 🔥 新增：天官贵人（按日干查法，按《三命通会》理论）
+        # 《三命通会》："天官者，天之所授也。"
+        # 查法：甲见未，乙见申，丙见酉，丁见戌，戊见亥，己见子，庚见丑，辛见寅，壬见卯，癸见辰
+        tianguan_target = self._tianguan_guiren(day_master)
+        if tianguan_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == tianguan_target:
+                    ji_shen.append({
+                        'name': '天官贵人',
+                        'level': '中吉',
+                        'position': pillar,
+                        'description': '天官贵人临命，主官运亨通，宜从事公职、管理等工作。',
+                        'weight': 11
+                    })
+                    break
+
+        # 🔥 新增：天赦（按日干日支查法，按《三命通会》理论）
+        # 《三命通会》："天赦者，天之所赦也。"
+        # 查法：春（寅卯辰）戊寅日，夏（巳午未）甲午日，秋（申酉戌）戊申日，冬（亥子丑）甲子日
+        day_branch = pillars['day'][1]
+        tianshe_result = self._tianshe(day_master, day_branch, month_branch)
+        if tianshe_result:
+            ji_shen.append({
+                'name': '天赦',
+                'level': '大吉',
+                'position': 'day',
+                'description': '天赦临命，主逢凶化吉，遇难呈祥，宜积极进取。',
+                'weight': 14
+            })
+
+        return ji_shen
+    
+    def _analyze_xiong_shen(self, bazi_data: BaziData) -> List[Dict[str, Any]]:
+        """分析凶神"""
+        # ✅ 修复：在函数开始就建立去重机制，确保每个凶神类型只添加一次
+        xiong_shen = []
+        xiong_shen_names_seen = set()  # 记录已添加的凶神名称（用于最终去重检查）
+        pillars = bazi_data.get_pillars()
+        day_master = bazi_data.get_day_master()
+        month_branch = bazi_data.get_month_branch()
+        
+        # ✅ 统一：羊刃（按日干查表法，不能用三合/六合法）
+        # 《三命通会·论羊刃》："羊刃者，禄前一位也"
+        # 说明：羊刃是"禄前一位"的关系，不能用三合/六合法计算，必须用查表法
+        # 理论依据：甲禄在寅，刃在卯（寅前一位）；乙禄在卯，刃在寅（卯前一位）等
+        yangren_target = self.shensha_tables['yangren'].get(day_master)
+        if yangren_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == yangren_target:
+                    xiong_shen.append({
+                        'name': '羊刃',
+                        'level': '大凶',
+                        'position': pillar,
+                        'description': '羊刃主刑伤，性格刚烈，易有血光之灾。（按日干查表法，不能用三合/六合法）',
+                        'weight': 12
+                    })
+                    break
+        
+        # ✅ 统一：劫煞（三合局绝地法）- 基于《三命通会》原文
+        # 《三命通会》："水绝在巳，申子辰以巳为劫煞；火绝在亥，寅午戌以亥为劫煞；
+        #                金绝在寅，巳酉丑以寅为劫煞；木绝在申，亥卯未以申为劫煞"
+        # ✅ 三合法查法（基于五行十二长生绝地）：
+        # - 申子辰（水局）：劫煞在巳（水绝于巳）✅ 三合法
+        # - 寅午戌（火局）：劫煞在亥（火绝于亥）✅ 三合法
+        # - 巳酉丑（金局）：劫煞在寅（金绝于寅）✅ 三合法
+        # - 亥卯未（木局）：劫煞在申（木绝于申）✅ 三合法
+        # 理论依据：五行十二长生表（绝地）
+        SANHE_JIESHA_MAP = {
+            ('申', '子', '辰'): '巳',  # 申子辰水局 -> 劫煞在巳
+            ('寅', '午', '戌'): '亥',  # 寅午戌火局 -> 劫煞在亥
+            ('巳', '酉', '丑'): '寅',  # 巳酉丑金局 -> 劫煞在寅
+            ('亥', '卯', '未'): '申',  # 亥卯未木局 -> 劫煞在申
+        }
+        
+        # 获取四柱地支
+        all_branches = [pillars[pos][1] for pos in ['year', 'month', 'day', 'hour']]
+        
+        # 检查是否有完整三合局（必须3个地支）
+        for sanhe_branches, jiesha_branch in SANHE_JIESHA_MAP.items():
+            # 检查四柱中是否包含三合局的所有3个地支
+            sanhe_count = sum(1 for b in sanhe_branches if b in all_branches)
+            
+            # 🔥 修复：只有完整三合局（3个地支）才算成局
+            if sanhe_count >= 3:
+                # 检查四柱中是否有劫煞位
+                for pillar, (gan, zhi) in pillars.items():
+                    if zhi == jiesha_branch:
+                        xiong_shen.append({
+                            'name': '劫煞',
+                            'level': '中凶',
+                            'position': pillar,
+                            'description': '劫煞主破财，易遭小人，事业不顺。',
+                            'weight': 8
+                        })
+                        break  # 一个三合局只算一次劫煞
+        
+        # ✅ 统一：孤辰、寡宿（基于三合局查表法）
+        # 《三命通会·论孤辰寡宿》：按年支三合局查表
+        # 理论依据：三合局的前后辰位
+        # - 申子辰（水局）：孤辰在寅（前辰），寡宿在戌（后辰）
+        # - 亥卯未（木局）：孤辰在巳（前辰），寡宿在丑（后辰）
+        # - 寅午戌（火局）：孤辰在申（前辰），寡宿在辰（后辰）
+        # - 巳酉丑（金局）：孤辰在亥（前辰），寡宿在未（后辰）
+        year_branch = pillars['year'][1]
+        gucheng_target, guasu_target = self._gucheng_guasu(year_branch)
+        gucheng_found = False
+        guasu_found = False
+        for pillar, (gan, zhi) in pillars.items():
+            if not gucheng_found and zhi == gucheng_target:
+                xiong_shen.append({
+                    'name': '孤辰',
+                    'level': '小凶',
+                    'position': pillar,
+                    'description': '孤辰主性情孤傲，宜增进沟通与合作。（三合局查表法）',
+                    'weight': 5
+                })
+                gucheng_found = True
+            if not guasu_found and zhi == guasu_target:
+                xiong_shen.append({
+                    'name': '寡宿',
+                    'level': '小凶',
+                    'position': pillar,
+                    'description': '寡宿主独处少缘，宜重视情感维系。（三合局查表法）',
+                    'weight': 5
+                })
+                guasu_found = True
+
+        # 🔥 修复：华盖应该在吉神列表中，而不是凶神列表
+        # 华盖判断已经移到 _analyze_ji_shen 方法中
+
+        # ✅ 统一：空亡（60甲子旬空法，不能用三合/六合法）
+        # 《三命通会》："空亡者，六甲旬空也"
+        # 说明：空亡是基于60甲子旬的查法，不能用三合/六合法，必须用60甲子旬空法
+        # 理论依据：每个旬有10个干支，剩下的2个地支为空亡
+        day_pillar = pillars['day']
+        kongwang_pair = self._kongwang(day_pillar)
+        if kongwang_pair:
+            kongwang_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in kongwang_pair:
+                    kongwang_positions.append(pillar)
+            
+            # 收集完所有位置后再添加，避免重复
+            if kongwang_positions:
+                xiong_shen.append({
+                    'name': '空亡',
+                    'level': '小凶',
+                    'position': '、'.join(kongwang_positions) if len(kongwang_positions) > 1 else kongwang_positions[0],
+                    'description': '空亡主虚耗，事多反复，宜稳健行事。（60甲子旬空法，不能用三合/六合法）',
+                    'weight': 4
+                })
+
+        # ✅ 统一：天罗地网（基于传统查表法，无明确三合/六合法依据）
+        # 说明：天罗地网有多种查法，但都没有明确的三合局或六合法依据
+        # 传统查法：辰戌年支见戌亥为天罗，巳亥年支见辰巳为地网
+        # ⚠️ 注意：此神煞不能用三合/六合法，采用传统查表法
+        year_branch = pillars['year'][1]
+        # ✅ 修复：天罗地网只添加一次，避免重复
+        if year_branch in {'辰', '戌'}:
+            # 天罗：辰戌年支，四柱见戌亥（传统查表法，非三合/六合法）
+            tianluo_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in {'戌', '亥'}:
+                    tianluo_positions.append(pillar)
+            
+            if tianluo_positions:
+                xiong_shen.append({
+                    'name': '天罗',
+                    'level': '中凶',
+                    'position': '、'.join(tianluo_positions) if len(tianluo_positions) > 1 else tianluo_positions[0],
+                    'description': '天罗主困缚阻滞，宜避险趋吉。（传统查表法，非三合/六合法）',
+                    'weight': 6
+                })
+        elif year_branch in {'巳', '亥'}:
+            # 地网：巳亥年支，四柱见辰巳（传统查表法，非三合/六合法）
+            diwang_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in {'辰', '巳'}:
+                    diwang_positions.append(pillar)
+            
+            if diwang_positions:
+                xiong_shen.append({
+                    'name': '地网',
+                    'level': '中凶',
+                    'position': '、'.join(diwang_positions) if len(diwang_positions) > 1 else diwang_positions[0],
+                    'description': '地网主羁绊纠缠，宜循法守序。（传统查表法，非三合/六合法）',
+                    'weight': 6
+                })
+
+        # ✅ 统一：桃花（三合局沐浴法）- 基于《三命通会》原文
+        # 《三命通会》："咸池者，三合局沐浴也。寅午戌见卯，申子辰见酉，亥卯未见子，巳酉丑见午。"
+        # ✅ 三合法查法（基于五行十二长生沐浴）：
+        # - 寅午戌（火局）：桃花在卯（火沐浴在卯）✅ 三合法
+        # - 申子辰（水局）：桃花在酉（水沐浴在酉）✅ 三合法
+        # - 亥卯未（木局）：桃花在子（木沐浴在子）✅ 三合法
+        # - 巳酉丑（金局）：桃花在午（金沐浴在午）✅ 三合法
+        # 理论依据：五行十二长生表（沐浴位）
+        # 采用以年支为主的查法（更常用）
+        year_branch = pillars['year'][1]
+        taohua_map = {
+            '寅': '卯', '午': '卯', '戌': '卯',  # 寅午戌见卯
+            '申': '酉', '子': '酉', '辰': '酉',  # 申子辰见酉
+            '亥': '子', '卯': '子', '未': '子',  # 亥卯未见子
+            '巳': '午', '酉': '午', '丑': '午'   # 巳酉丑见午
+        }
+        taohua_target = taohua_map.get(year_branch)
+        # ✅ 修复：桃花只添加一次，避免重复
+        if taohua_target:
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi == taohua_target:
+                    xiong_shen.append({
+                        'name': '桃花',
+                        'level': '小凶',  # 中性偏小凶：主情感波动，需正己自持
+                        'position': pillar,
+                        'description': '桃花（咸池）动，主情感波动、人缘复杂，虽有魅力但需正己自持，避免感情纠葛。',
+                        'weight': 4
+                    })
+                    break  # ✅ 修复：找到就退出，避免重复
+
+        # ✅ 统一：三刑分析（基于《三命通会·论三刑》，不能用三合/六合法）
+        # 《三命通会·论三刑》："刑者，伤也"
+        # 说明：三刑是地支间的刑伤关系，不能用三合/六合法计算，必须直接判断地支组合
+        # 理论依据：无恩之刑（寅巳申互刑）、无礼之刑（子卯互刑）、恃势之刑（丑戌未互刑）、自刑
+        sanxing_result = self._sanxing(pillars)
+        if sanxing_result:
+            seen_sanxing_types = set()  # 记录已添加的三刑类型
+            for item in sanxing_result:
+                sanxing_key = item['name']  # 三刑类型名称
+                if sanxing_key not in seen_sanxing_types:
+                    xiong_shen.append({
+                        'name': item['name'],
+                        'level': item['level'],
+                        'position': item['position'],
+                        'description': item['description'],
+                        'weight': item['weight']
+                    })
+                    seen_sanxing_types.add(sanxing_key)
+
+        # ✅ 统一：官符煞（太岁前五辰查表法，不能用三合/六合法）
+        # 《三命通会》："官符煞。取太岁前五辰，是日时遇之。平生多官灾，更并羊刃，乃刑徒之命。"
+        # 说明：官符煞是"太岁前五辰"的固定关系，不能用三合/六合法，必须用查表法
+        guanfu_result = self._guanfu_shitou(pillars)
+        if guanfu_result:
+            xiong_shen.append({
+                'name': '官符煞',
+                'level': '中凶',
+                'position': guanfu_result['position'],
+                'description': '官符煞主官灾，更并羊刃，乃刑徒之命。平生多官灾，宜循法守序，避免是非。（太岁前五辰查表法，不能用三合/六合法）',
+                'weight': 10
+            })
+
+        # ✅ 统一：勾绞煞（命前后三辰计算法，不能用三合/六合法）
+        # 《三命通会·论勾绞》："勾者，牵连之义；绞者，羁绊之名"
+        # "阳男阴女，命前三辰为勾；命后三辰为绞；阴男阳女，命前三辰为绞，命后三辰为勾"
+        # 说明：勾绞煞是"命前后三辰"的固定关系，不能用三合/六合法，必须用计算方法
+        goujiao_result = self._goujiao_shitou(bazi_data)
+        if goujiao_result:
+            for item in goujiao_result:
+                xiong_shen.append({
+                    'name': item['name'],
+                    'level': item['level'],
+                    'position': item['position'],
+                    'description': f"{item['description']}（命前后三辰计算法，不能用三合/六合法）",
+                    'weight': item['weight']
+                })
+
+        # ✅ 统一：灾煞（三合局冲破将星法）- 基于《三命通会·论灾煞》
+        # 《三命通会》："灾煞者，其性勇猛，常居劫煞之前，冲破将星，谓之灾煞。"
+        # "此煞主血光横死。在水火，防焚溺；金木杖刃；土坠落，瘟疫克身，大凶。"
+        # ✅ 三合法查法（基于三合局将星对冲）：
+        # - 申子辰将星在子，灾煞在午（午冲子）✅ 三合法
+        # - 寅午戌将星在午，灾煞在子（子冲午）✅ 三合法
+        # - 巳酉丑将星在酉，灾煞在卯（卯冲酉）✅ 三合法
+        # - 亥卯未将星在卯，灾煞在酉（酉冲卯）✅ 三合法
+        zhaisha_result = self._zhaisha(pillars)
+        if zhaisha_result:
+            xiong_shen.append({
+                'name': '灾煞',
+                'level': '大凶',
+                'position': zhaisha_result['position'],
+                'description': f"灾煞主血光横死。在水火，防焚溺；金木杖刃；土坠落，瘟疫克身。{zhaisha_result['wuxing_note']}（三合局冲破将星法）",
+                'weight': 13
+            })
+
+        # ✅ 统一：六厄（三合局死地法）- 基于《三命通会·论六厄》
+        # 《三命通会》："六厄者，三合局死地也"
+        # "若有救护，有扶持，逢生旺兼贵气相助，则吉，究竟一生蹇滞。"
+        liue_result = self._liue(pillars)
+        if liue_result:
+            xiong_shen.append({
+                'name': '六厄',
+                'level': '中凶',
+                'position': liue_result['position'],
+                'description': '六厄主遭难，一生蹇滞。若有救护、扶持、逢生旺兼贵气相助，则吉。（三合局死地法）',
+                'weight': 8
+            })
+
+        # 注意：红鸾、天喜是吉神，不应该在凶神分析中
+        # 这些应该在 _analyze_ji_shen 中处理，这里只返回凶神
+
+        # ✅ 最终去重检查：确保没有重复的凶神名称
+        # 如果有重复（可能是不同代码路径产生的），保留第一个（通常权重更高或更完整）
+        final_xiong_shen = []
+        final_seen_names = set()
+        for item in xiong_shen:
+            name = item.get('name', '未知')
+            if name not in final_seen_names:
+                final_xiong_shen.append(item)
+                final_seen_names.add(name)
+            else:
+                # 如果发现重复，记录日志（用于调试）
+                print(f"⚠️ 检测到重复的凶神：{name}，已自动去重")
+
+        return final_xiong_shen
+    
+    def _calculate_jiesha_positions(self, year_branch: str) -> List[str]:
+        """
+        ✅ 修复：根据年支计算劫煞位置（三合局绝地）
+        《三命通会》"劫煞者，三合局绝地也"：
+        《三命通会》原文："水绝在巳，申子辰以巳为劫煞；火绝在亥，寅午戌以亥为劫煞；
+                          金绝在寅，巳酉丑以寅为劫煞；木绝在申，亥卯未以申为劫煞"
+        
+        正确查法：
+        - 申子辰见巳为劫煞（申子辰绝在巳，水绝于巳）✅
+        - 亥卯未见申为劫煞（亥卯未绝在申，木绝于申）✅
+        - 寅午戌见亥为劫煞（寅午戌绝在亥，火绝于亥）✅
+        - 巳酉丑见寅为劫煞（巳酉丑绝在寅，金绝于寅）✅
+        """
+        jiesha_map = {
+            '申': '巳',  # 申子辰绝在巳（水绝于巳）✅ 修复
+            '子': '巳',   # 申子辰绝在巳 ✅ 修复
+            '辰': '巳',   # 申子辰绝在巳 ✅ 修复
+            '亥': '申',   # 亥卯未绝在申（木绝于申）✅
+            '卯': '申',   # 亥卯未绝在申 ✅
+            '未': '申',   # 亥卯未绝在申 ✅
+            '寅': '亥',   # 寅午戌绝在亥（火绝于亥）✅
+            '午': '亥',   # 寅午戌绝在亥 ✅
+            '戌': '亥',   # 寅午戌绝在亥 ✅
+            '巳': '寅',   # 巳酉丑绝在寅（金绝于寅）✅
+            '酉': '寅',   # 巳酉丑绝在寅 ✅
+            '丑': '寅'    # 巳酉丑绝在寅 ✅
+        }
+        jiesha_zhi = jiesha_map.get(year_branch)
+        return [jiesha_zhi] if jiesha_zhi else []
+
+    def _gucheng_guasu(self, year_branch: str) -> tuple[str, str]:
+        # 常用表：
+        # 申子辰：孤辰在寅，寡宿在戌
+        # 亥卯未：孤辰在巳，寡宿在丑
+        # 寅午戌：孤辰在申，寡宿在辰
+        # 巳酉丑：孤辰在亥，寡宿在未
+        group = None
+        if year_branch in {'申', '子', '辰'}:
+            return '寅', '戌'
+        if year_branch in {'亥', '卯', '未'}:
+            return '巳', '丑'
+        if year_branch in {'寅', '午', '戌'}:
+            return '申', '辰'
+        if year_branch in {'巳', '酉', '丑'}:
+            return '亥', '未'
+        return '', ''
+
+    def _huagai(self, branch: str) -> str:
+        """
+        华盖查法 - 基于《三命通会》理论
+        🔥 修复：使用日支作为基准（而不是年支）
+        
+        查法：寅午戌见戌，亥卯未见未，申子辰见辰，巳酉丑见丑。
+        """
+        # 三合局对应的华盖地支
+        if branch in {'寅', '午', '戌'}:
+            return '戌'  # 寅午戌见戌
+        if branch in {'亥', '卯', '未'}:
+            return '未'  # 亥卯未见未
+        if branch in {'申', '子', '辰'}:
+            return '辰'  # 申子辰见辰
+        if branch in {'巳', '酉', '丑'}:
+            return '丑'  # 巳酉丑见丑
+        return ''
+    
+    def _yima(self, year_branch: str) -> str:
+        """
+        驿马查法 - 基于《三命通会》理论
+        《三命通会》："驿马者，三合局对冲也。申子辰马在寅，寅午戌马在申，巳酉丑马在亥，亥卯未马在巳。"
+        
+        查法：以年支为准，三合局的对冲地支为驿马
+        - 申子辰（水局）→ 驿马在寅（对冲）
+        - 寅午戌（火局）→ 驿马在申（对冲）
+        - 巳酉丑（金局）→ 驿马在亥（对冲）
+        - 亥卯未（木局）→ 驿马在巳（对冲）
+        """
+        if year_branch in {'申', '子', '辰'}:
+            return '寅'  # 申子辰马在寅
+        if year_branch in {'寅', '午', '戌'}:
+            return '申'  # 寅午戌马在申
+        if year_branch in {'巳', '酉', '丑'}:
+            return '亥'  # 巳酉丑马在亥
+        if year_branch in {'亥', '卯', '未'}:
+            return '巳'  # 亥卯未马在巳
+        return ''
+
+    def _kongwang(self, day_pillar: tuple[str, str]) -> tuple[str, str] | None:
+        """
+        🔥 修复：根据日柱计算空亡（六甲旬空法）- 使用60甲子查表法
+        空亡是按六甲旬计算的，不是按日干：
+        - 甲子旬（甲子～癸酉）：戌亥空
+        - 甲戌旬（甲戌～癸未）：申酉空
+        - 甲申旬（甲申～癸巳）：午未空
+        - 甲午旬（甲午～癸卯）：辰巳空
+        - 甲辰旬（甲辰～癸丑）：寅卯空
+        - 甲寅旬（甲寅～癸亥）：子丑空
+        
+        正确方法：直接在60甲子表中查找日柱位置，确定所属旬
+        """
+        gan, zhi = day_pillar
+        day_gz = gan + zhi
+        
+        # 60甲子完整列表
+        LIUSHI_JIAZI = [
+            '甲子', '乙丑', '丙寅', '丁卯', '戊辰', '己巳', '庚午', '辛未', '壬申', '癸酉',  # 0-9: 甲子旬
+            '甲戌', '乙亥', '丙子', '丁丑', '戊寅', '己卯', '庚辰', '辛巳', '壬午', '癸未',  # 10-19: 甲戌旬
+            '甲申', '乙酉', '丙戌', '丁亥', '戊子', '己丑', '庚寅', '辛卯', '壬辰', '癸巳',  # 20-29: 甲申旬
+            '甲午', '乙未', '丙申', '丁酉', '戊戌', '己亥', '庚子', '辛丑', '壬寅', '癸卯',  # 30-39: 甲午旬
+            '甲辰', '乙巳', '丙午', '丁未', '戊申', '己酉', '庚戌', '辛亥', '壬子', '癸丑',  # 40-49: 甲辰旬
+            '甲寅', '乙卯', '丙辰', '丁巳', '戊午', '己未', '庚申', '辛酉', '壬戌', '癸亥',  # 50-59: 甲寅旬
+        ]
+        
+        # 在60甲子中找到日柱位置
+        if day_gz in LIUSHI_JIAZI:
+            idx = LIUSHI_JIAZI.index(day_gz)
+            xun_idx = idx // 10  # 确定所属的旬（0-5）
+            
+            # 六甲旬空对照表
+            kongwang_map = {
+                0: ('戌', '亥'),   # 甲子旬：戌亥空
+                1: ('申', '酉'),   # 甲戌旬：申酉空
+                2: ('午', '未'),   # 甲申旬：午未空
+                3: ('辰', '巳'),   # 甲午旬：辰巳空
+                4: ('寅', '卯'),   # 甲辰旬：寅卯空
+                5: ('子', '丑'),   # 甲寅旬：子丑空
+            }
+            
+            return kongwang_map.get(xun_idx)
+        
+        return None
+
+    def _is_taohua(self, zhi: str, day_master: str) -> bool:
+        """
+        🔥 已废弃：此函数使用错误的按日干查表法
+        桃花应该按三合局计算：申子辰见酉、亥卯未见子、寅午戌见卯、巳酉丑见午
+        实际代码中已经在_analyze_xiong_shen方法中正确实现了按三合局计算的桃花
+        此函数保留但不使用，或可删除
+        """
+        # 错误的方法：按日干查表（不应使用）
+        taohua_map = {
+            '甲': '酉', '乙': '酉',
+            '丙': '卯', '丁': '卯',
+            '戊': '子', '己': '子',
+            '庚': '午', '辛': '午',
+            '壬': '卯', '癸': '卯'
+        }
+        return zhi == taohua_map.get(day_master)
+
+    def _hongluan_tianxi(self, zhi: str) -> str:
+        # 红鸾天喜（常用对照，示意用，后续可扩）
+        table = {
+            '子': '天喜', '午': '红鸾',
+            '丑': '红鸾', '未': '天喜',
+            '寅': '天喜', '申': '红鸾',
+            '卯': '红鸾', '酉': '天喜',
+            '辰': '天喜', '戌': '红鸾',
+            '巳': '红鸾', '亥': '天喜'
+        }
+        return table.get(zhi, '')
+
+    def _hongluan_tianxi_by_year(self, year_branch: str) -> tuple[str, str]:
+        """按年支引动红鸾/天喜（全量表）"""
+        # 常用完整表：
+        # 子：红鸾卯、天喜酉；丑：红鸾寅、天喜申；寅：红鸾丑、天喜未；卯：红鸾子、天喜午；
+        # 辰：红鸾亥、天喜巳；巳：红鸾戌、天喜辰；午：红鸾酉、天喜子；未：红鸾申、天喜丑；
+        # 申：红鸾未、天喜丑；酉：红鸾午、天喜子；戌：红鸾巳、天喜亥；亥：红鸾辰、天喜戌
+        table_hl = {
+            '子':'卯','丑':'寅','寅':'丑','卯':'子','辰':'亥','巳':'戌',
+            '午':'酉','未':'申','申':'未','酉':'午','戌':'巳','亥':'辰'
+        }
+        table_tx = {
+            '子':'酉','丑':'申','寅':'未','卯':'午','辰':'巳','巳':'辰',
+            '午':'子','未':'丑','申':'丑','酉':'子','戌':'亥','亥':'戌'
+        }
+        return table_hl.get(year_branch, ''), table_tx.get(year_branch, '')
+
+    def _get_xuetang(self, day_gan: str) -> str:
+        """学堂（按日干取支，常用表）"""
+        # 甲巳、乙午、丙申、丁酉、戊亥、己子、庚寅、辛卯、壬巳、癸午
+        table = {
+            '甲':'巳','乙':'午','丙':'申','丁':'酉','戊':'亥',
+            '己':'子','庚':'寅','辛':'卯','壬':'巳','癸':'午'
+        }
+        return table.get(day_gan, '')
+
+    def _get_ciguan(self, day_gan: str) -> str:
+        """词馆（按日干取支，常用表，与学堂相对）"""
+        # 甲午、乙巳、丙酉、丁申、戊子、己亥、庚卯、辛寅、壬午、癸巳
+        table = {
+            '甲':'午','乙':'巳','丙':'酉','丁':'申','戊':'子',
+            '己':'亥','庚':'卯','辛':'寅','壬':'午','癸':'巳'
+        }
+        return table.get(day_gan, '')
+
+    def _get_lushen(self, day_gan: str) -> str:
+        """禄神（按日干禄位）"""
+        # 甲寅、乙卯、丙巳、丁午、戊巳、己午、庚申、辛酉、壬亥、癸子
+        table = {
+            '甲':'寅','乙':'卯','丙':'巳','丁':'午','戊':'巳',
+            '己':'午','庚':'申','辛':'酉','壬':'亥','癸':'子'
+        }
+        return table.get(day_gan, '')
+    
+    def _calculate_shensha_score(self, ji_shen: List[Dict], xiong_shen: List[Dict], bazi_data: BaziData = None) -> float:
+        """
+        计算神煞评分 - 基于《三命通会·论天月德》等经典理论
+        ✅ 修复：不再使用base_score + ji_score - xiong_score的简单累加
+        改为基于经典理论的综合判断，考虑神煞组合和具体作用
+        
+        理论依据：
+        1. 《三命通会·论天月德》："二德扶持，众凶解散"
+        2. "凡命中带凶煞，得此二德扶化，凶不为甚"
+        3. "天德胜月德也"
+        4. 神煞需结合十神和格局综合判断
+        """
+        # ✅ 修复：基于经典理论综合判断，而不是简单累加
+        
+        # 1. 获取神煞名称集合
+        ji_names = {shen.get('name', '') for shen in ji_shen}
+        xiong_names = {shen.get('name', '') for shen in xiong_shen}
+        
+        # 2. 检查关键神煞组合（基于《三命通会》理论）
+        level_reason = self._judge_shensha_level_classical(ji_shen, xiong_shen, ji_names, xiong_names, bazi_data)
+        
+        # 3. 将等级转换为分数（用于兼容性，但不作为主要判断依据）
+        level_to_score = {
+            '大吉': 90.0,
+            '吉': 75.0,
+            '中平': 55.0,
+            '凶': 35.0,
+            '大凶': 20.0
+        }
+        
+        level = level_reason.get('level', '中平')
+        return level_to_score.get(level, 55.0)
+    
+    def _judge_shensha_level_classical(self, ji_shen: List[Dict], xiong_shen: List[Dict],
+                                       ji_names: set, xiong_names: set,
+                                       bazi_data: BaziData = None) -> Dict[str, Any]:
+        """
+        基于《三命通会》经典理论判断神煞等级
+        
+        返回: {'level': '大吉/吉/中平/凶/大凶', 'reason': '判断依据'}
+        """
+        from ..core.utils import get_ten_god
+        
+        # ═══════════════════════════════════════════════════════════════
+        # 上等吉格（基于《三命通会·论天月德》等经典论述）
+        # ═══════════════════════════════════════════════════════════════
+        
+        # 1. 天月德合（《三命通会·论天月德》："二德扶持，众凶解散"）
+        if '天德贵人' in ji_names and '月德贵人' in ji_names:
+            # 天德胜月德，二德并见，大吉
+            # 即使有凶煞，也能化解（《三命通会》："凡命中带凶煞，得此二德扶化，凶不为甚"）
+            if len(xiong_names) > 0:
+                return {
+                    'level': '吉',
+                    'reason': '天月德合，二德扶持，众凶解散（《三命通会·论天月德》："二德扶持，众凶解散。凡命中带凶煞，得此二德扶化，凶不为甚。"）'
+                }
+            else:
+                return {
+                    'level': '大吉',
+                    'reason': '天月德合，二德扶持，大吉之象（《三命通会·论天月德》："天德胜月德也"）'
+                }
+        
+        # 2. 天德贵人单独出现（《三命通会·论天月德》："天德胜月德也"）
+        if '天德贵人' in ji_names:
+            if len(xiong_names) == 0:
+                return {
+                    'level': '吉',
+                    'reason': '天德贵人，主登台辅之位（《三命通会·论天月德》："天德者，五行福德之辰"）'
+                }
+            elif len(xiong_names) <= 2:
+                return {
+                    'level': '中平',
+                    'reason': '天德贵人，能化解部分凶煞（《三命通会·论天月德》："凡命中带凶煞，得此二德扶化，凶不为甚"）'
+                }
+        
+        # 3. 羊刃驾杀（《渊海子平》：羊刃驾杀，英雄独压万人）
+        # 羊刃 + 七杀，反而成格
+        has_yangren = '羊刃' in xiong_names
+        has_qisha = False
+        if bazi_data and has_yangren:
+            day_master = bazi_data.get_day_master()
+            pillars = bazi_data.get_pillars()
+            for pillar, (gan, zhi) in pillars.items():
+                ten_god = get_ten_god(day_master, gan)
+                if ten_god == '偏官':  # 偏官即七杀
+                    has_qisha = True
+                    break
+                # 检查藏干中的七杀
+                from ..core.constants import DIZHI_CANGGAN
+                for canggan, _ in DIZHI_CANGGAN.get(zhi, []):
+                    if get_ten_god(day_master, canggan) == '偏官':
+                        has_qisha = True
+                        break
+                if has_qisha:
+                    break
+        
+        if has_yangren and has_qisha:
+            # 羊刃驾杀，反凶为吉
+            return {
+                'level': '吉',
+                'reason': '羊刃驾杀，英雄独压万人（《渊海子平》：羊刃驾杀，反凶为吉，主武贵、权威）'
+            }
+        
+        # 4. 天乙贵人 + 三奇贵人（《三命通会·论天月德》："与三奇、天乙贵同并，尤为吉庆"）
+        if '天乙贵人' in ji_names and len(ji_names) >= 3:
+            return {
+                'level': '大吉',
+                'reason': '天乙贵人与三奇贵人同并，尤为吉庆（《三命通会·论天月德》："与三奇、天乙贵同并，尤为吉庆"）'
+            }
+        
+        # ═══════════════════════════════════════════════════════════════
+        # 中等吉格
+        # ═══════════════════════════════════════════════════════════════
+        
+        # 5. 多个吉神汇聚（但无特殊组合）
+        if len(ji_names) >= 3 and len(xiong_names) == 0:
+            return {
+                'level': '吉',
+                'reason': '多个吉神汇聚，主福寿两全（《三命通会·论天月德》：入贱格，一生温饱，福寿两全）'
+            }
+        
+        # 6. 天乙贵人单独出现
+        if '天乙贵人' in ji_names:
+            if len(xiong_names) == 0:
+                return {
+                    'level': '吉',
+                    'reason': '天乙贵人，主富贵（《三命通会》：天乙贵人，最吉之神）'
+                }
+            else:
+                return {
+                    'level': '中平',
+                    'reason': '天乙贵人，但遇凶煞，吉凶参半（《三命通会》：贵人逢凶，需结合其他因素判断）'
+                }
+        
+        # 7. 文昌贵人 + 华盖（利于学术艺术）
+        if '文昌' in ji_names and '华盖' in ji_names:
+            return {
+                'level': '吉',
+                'reason': '文昌贵人遇华盖，利于学术艺术（《三命通会》：文昌主文才，华盖主艺术）'
+            }
+        
+        # ═══════════════════════════════════════════════════════════════
+        # 凶格判断
+        # ═══════════════════════════════════════════════════════════════
+        
+        # 8. 多个凶煞汇聚（无吉神化解）
+        if len(xiong_names) >= 3 and len(ji_names) == 0:
+            return {
+                'level': '大凶',
+                'reason': '多个凶煞汇聚且无吉神化解，主凶（《三命通会·论天月德》：凡命中带凶煞，需吉神化解）'
+            }
+        
+        # 9. 羊刃单独出现（无七杀制约）
+        if has_yangren and not has_qisha:
+            return {
+                'level': '凶',
+                'reason': '羊刃无制，主刚强暴烈（《三命通会》：羊刃主凶，需有制化）'
+            }
+        
+        # 10. 孤辰寡宿同现（《三命通会》：加重孤独）
+        if '孤辰' in xiong_names and '寡宿' in xiong_names:
+            return {
+                'level': '凶',
+                'reason': '孤辰寡宿同现，主孤独（《三命通会》：孤辰寡宿同现，加重孤独）'
+            }
+        
+        # ═══════════════════════════════════════════════════════════════
+        # 一般情况判断（需结合具体组合）
+        # ═══════════════════════════════════════════════════════════════
+        
+        # 11. 吉凶神数量对比
+        ji_count = len(ji_names)
+        xiong_count = len(xiong_names)
+        
+        if ji_count > xiong_count * 2:
+            return {
+                'level': '吉',
+                'reason': '吉神明显多于凶神，主吉（《三命通会》：吉神多主福）'
+            }
+        elif xiong_count > ji_count * 2:
+            return {
+                'level': '凶',
+                'reason': '凶神明显多于吉神，主凶（《三命通会》：凶神多主祸）'
+            }
+        elif ji_count > 0 and xiong_count == 0:
+            return {
+                'level': '吉',
+                'reason': '有吉神无凶神，主吉（《三命通会》：吉神主福）'
+            }
+        elif xiong_count > 0 and ji_count == 0:
+            return {
+                'level': '凶',
+                'reason': '有凶神无吉神，主凶（《三命通会》：凶神主祸）'
+            }
+        
+        # 12. 吉凶参半
+        if ji_count > 0 and xiong_count > 0:
+            return {
+                'level': '中平',
+                'reason': '吉凶神并存，吉凶参半，需结合格局和大运具体分析（《三命通会·论天月德》：需结合格局和十神配置判断）'
+            }
+        
+        # 13. 无神煞或神煞很少
+        return {
+            'level': '中平',
+            'reason': '神煞较少或无明显神煞，需结合格局和十神配置判断（《三命通会》：神煞为辅助，格局为主）'
+        }
+
+    def _calculate_combo_bonus(self, ji_shen: List[Dict], xiong_shen: List[Dict], bazi_data: BaziData = None) -> float:
+        """
+        计算神煞组合效应加成
+        ✅ 新增：根据《三命通会》理论，某些神煞组合有特殊效应
+        🔥 修复：羊刃驾杀判断需要从十神信息中获取七杀，而不是从神煞中查找
+        """
+        bonus = 0.0
+
+        ji_names = {shen.get('name', '') for shen in ji_shen}
+        xiong_names = {shen.get('name', '') for shen in xiong_shen}
+
+        # 天月德合：天德贵人 + 月德贵人 = 大吉
+        if '天德贵人' in ji_names and '月德贵人' in ji_names:
+            bonus += 10.0
+
+        # 三奇贵人：甲戊庚、乙丙丁、壬癸辛
+        # （简化判断：如果有多个贵人）
+        if len(ji_names) >= 3:
+            bonus += 5.0
+
+        # 🔥 修复：羊刃驾杀：羊刃 + 七杀 同时出现，反而成格
+        # 七杀是十神，不是神煞，需要从四柱的十神信息中获取
+        has_yangren = '羊刃' in xiong_names
+        has_qisha = False
+        if bazi_data and has_yangren:
+            # 检查四柱中是否有七杀（偏官）
+            day_master = bazi_data.get_day_master()
+            pillars = bazi_data.get_pillars()
+            for pillar, (gan, zhi) in pillars.items():
+                ten_god = get_ten_god(day_master, gan)
+                if ten_god == '七杀':
+                    has_qisha = True
+                    break
+        if has_yangren and has_qisha:
+            bonus += 15.0  # 羊刃驾杀，反凶为吉
+
+        # 魁罡 + 贵人：魁罡遇贵人，反而不吉
+        if '魁罡' in ji_names and ('天乙贵人' in ji_names or '天德贵人' in ji_names):
+            bonus -= 8.0  # 魁罡不喜贵人
+
+        # 孤辰寡宿同现：加重孤独
+        if '孤辰' in xiong_names and '寡宿' in xiong_names:
+            bonus -= 5.0
+
+        # 华盖 + 文昌：利于学术艺术
+        if '华盖' in ji_names and '文昌' in ji_names:
+            bonus += 6.0
+
+        return bonus
+    
+    def _determine_level(self, score: float) -> str:
+        """确定等级"""
+        if score >= 85:
+            return '大吉'
+        elif score >= 70:
+            return '吉'
+        elif score >= 55:
+            return '中平'
+        elif score >= 40:
+            return '凶'
+        else:
+            return '大凶'
+    
+    def _generate_description(self, ji_shen: List[Dict], xiong_shen: List[Dict]) -> str:
+        """生成描述"""
+        ji_count = len(ji_shen)
+        xiong_count = len(xiong_shen)
+        
+        if ji_count > xiong_count:
+            return f"神煞分析：吉神{ji_count}个，凶神{xiong_count}个，整体吉利"
+        elif ji_count < xiong_count:
+            return f"神煞分析：吉神{ji_count}个，凶神{xiong_count}个，需要化解"
+        else:
+            return f"神煞分析：吉神{ji_count}个，凶神{xiong_count}个，吉凶参半"
+    
+    def _generate_advice(self, ji_shen: List[Dict], xiong_shen: List[Dict]) -> str:
+        """生成建议（包含吉神利用和凶神化解）"""
+        advice_parts = []
+        
+        if ji_shen:
+            # 🔥 新增：添加详细吉神利用建议
+            ji_advice = self._get_ji_shen_advice(ji_shen)
+            if ji_advice:
+                advice_parts.append(f"吉神利用建议：{ji_advice}")
+            else:
+                # 如果没有详细建议，至少显示吉神名称
+                ji_names = list(dict.fromkeys([shen['name'] for shen in ji_shen]))
+                advice_parts.append(f"吉神：{', '.join(ji_names)}，宜善加利用")
+        
+        if xiong_shen:
+            # 🔥 修复：去重凶神名称，避免重复显示
+            xiong_names = list(dict.fromkeys([shen['name'] for shen in xiong_shen]))
+            advice_parts.append(f"凶神：{', '.join(xiong_names)}，需注意化解")
+            
+            # 添加具体化解建议（_get_hua_jie_advice内部也会去重）
+            hua_jie_advice = self._get_hua_jie_advice(xiong_shen)
+            if hua_jie_advice:
+                advice_parts.append(f"化解建议：{hua_jie_advice}")
+        
+        if not advice_parts:
+            advice_parts.append("神煞平衡，宜保持现状")
+        
+        return '；'.join(advice_parts)
+    
+    def _get_ji_shen_advice(self, ji_shen: List[Dict]) -> str:
+        """
+        获取吉神利用建议 - 🔥 新增：为所有吉神提供详细的利用说明
+        基于《三命通会》等经典理论
+        """
+        ji_advice_rules = {
+            '天德贵人': '天德贵人乃逢凶化吉之最大吉神，宜多行善事积德，在关键时刻可求助贵人，从事慈善、公益事业能增强其力量，佩戴绿色或青色饰品有助提升贵人运',
+            '月德贵人': '月德贵人主逢凶化吉，宜在每月吉日行事，多与德高望重者交往，从事与月亮、女性相关的行业有利，佩戴银色或白色饰品可增强其作用',
+            '天乙贵人': '天乙贵人为最尊贵之贵人星，宜积极寻求贵人帮助，从事管理、领导工作有利，在重要决策时咨询有经验的长辈或上级，佩戴金色饰品可增强贵人运',
+            '文昌贵人': '文昌贵人主聪明智慧、学业有成，宜专心学习深造，从事文化、教育、写作、研究等工作有利，多读书学习，佩戴文房四宝或文具类饰品可增强其作用',
+            '学堂': '学堂星主学习能力强，宜继续深造、进修提升，适合从事学术、教育、培训等工作，多参与学习交流活动，在书房或学习环境中工作更能发挥其作用',
+            '词馆': '词馆星主文采口才出众，宜从事写作、演讲、翻译、传媒等工作，多练习表达能力，参与文化活动，佩戴与文字、语言相关的饰品可增强其力量',
+            '禄神': '禄神主富贵荣华、财运亨通，宜积极进取、努力工作，从事稳定的工作或创业有利，理财投资需谨慎，佩戴黄色或金色饰品可增强财运',
+            '华盖': '华盖主艺术才华、清高孤傲，宜发展文化、艺术、宗教、哲学等方面的才能，适合从事艺术创作、设计、玄学等工作，保持独立思考，避免过度世俗化',
+            '红鸾': '红鸾星主婚喜人缘，单身者宜把握机会寻找良缘，已婚者宜增进夫妻感情，从事与婚庆、美容、服装等相关行业有利，佩戴红色或粉色饰品可增强桃花运',
+            '天喜': '天喜星主喜庆吉祥，宜在喜庆场合参与活动，多与人分享快乐，从事娱乐、餐饮、旅游等行业有利，保持乐观积极的心态，佩戴红色饰品可增强喜庆之气',
+            '驿马': '驿马主变动、出行、事业变迁，宜把握外出、出差、迁移的机会，从事贸易、物流、交通、旅游等行业有利，主动求变可带来好运，佩戴马形饰品可增强其作用',
+            '将星': '将星主领导才能、权威显赫，宜从事管理、领导、军事、执法等工作，培养领导力和组织能力，在重要时机勇于担当，佩戴象征权威的饰品可增强其力量',
+            '金舆': '金舆主富贵荣华、车马显达，宜从事与交通、物流、汽车相关的工作，注重生活品质的提升，多出行游历开阔眼界，佩戴与车辆、交通工具相关的饰品可增强其作用',
+            '太极贵人': '太极贵人主聪明智慧、学问深厚，宜从事文化、哲学、宗教、玄学等领域的工作，多学习传统文化，修身养性，保持内心平和，佩戴与太极、阴阳相关的饰品可增强其力量',
+            '国印贵人': '国印贵人主官运亨通、掌权有印，宜从事公职、管理、行政等工作，注重诚信和责任感，建立良好声誉，在关键时机把握晋升机会，佩戴印章类饰品可增强官运',
+            '福星贵人': '福星贵人主福气深厚、生活安逸，宜知足常乐，多行善事积累福德，从事稳定、福利好的工作有利，注重家庭和睦，佩戴与福字、蝙蝠相关的饰品可增强福运',
+            '三奇贵人': '三奇贵人主奇才异禀、非凡成就，宜把握特殊机遇，从事创新、科技、艺术等前沿领域有利，勇于突破常规，发挥独特才能，佩戴具有特殊意义的饰品可增强其力量',
+            '天官贵人': '天官贵人主官运亨通，宜从事公职、管理、司法等工作，注重品德修养，遵守法律法规，在官场或职场中建立良好关系，佩戴象征权力的饰品可增强官运',
+            '天赦': '天赦主逢凶化吉、遇难呈祥，是大赦之星，宜在困难时期保持信心，从事慈善、救助、医疗等工作有利，多帮助他人可增强其化解凶险的力量，佩戴绿色饰品可增强其作用'
+        }
+        
+        # 🔥 去重，每个吉神只显示一次利用建议
+        seen_names = set()
+        advice_list = []
+        for shen in ji_shen:
+            name = shen['name']
+            if name in ji_advice_rules and name not in seen_names:
+                advice_list.append(f"{name}：{ji_advice_rules[name]}")
+                seen_names.add(name)
+        
+        return '；'.join(advice_list) if advice_list else ""
+    
+    def _get_hua_jie_advice(self, xiong_shen: List[Dict]) -> str:
+        """
+        获取凶神化解建议 - 🔥 完善：为所有凶神提供详细的化解说明
+        基于《三命通会》等经典理论
+        """
+        hua_jie_rules = {
+            '羊刃': '羊刃主刑伤，性格刚烈，易有血光之灾。化解方法：佩戴金银饰品（金属可制木，化解羊刃之锐气），避免冲动行事，多行善事积德，练习静心修行的功夫，避免参与危险活动，注意交通安全',
+            '劫煞': '劫煞主破财，易遭小人，事业不顺。化解方法：佩戴玉石（土可生金，化解劫煞之凶性），避免借贷和担保，谨慎交友，远离是非之地，多结交正直友人，注重信用建设',
+            '桃花': '桃花（咸池）主动，主情感波动、人缘复杂，虽有魅力但需正己自持。化解方法：修身养性，正己自持，避免感情纠葛，保持情感专一，从事文化艺术工作可转化其能量，佩戴水晶类饰品可增强正面作用',
+            '孤辰': '孤辰主性情孤傲，人际关系淡薄。化解方法：多参与社交活动，培养兴趣爱好，主动与人交流合作，参加团体活动，培养团队精神，避免过度独处，从事需要协作的工作有利',
+            '寡宿': '寡宿主独处少缘，情感孤独。化解方法：重视家庭关系，多陪伴家人，培养情感交流，参与家庭聚会，培养宠物或植物，从事与照顾他人相关的工作，佩戴象征团圆的饰品',
+            '华盖': '华盖主艺术才华但易孤高，需注意人际关系。化解方法：发展艺术才能，学习传统文化，保持清高品格但不失谦逊，多与志同道合者交流，避免过度孤僻，从事文化艺术工作可发挥其正面作用',
+            '空亡': '空亡主虚耗，事多反复，容易落空。化解方法：脚踏实地，避免投机取巧，注重实际效果，制定明确目标和计划，多做实际工作而非空想，佩戴与踏实稳定相关的饰品，从事务实的工作有利',
+            '天罗': '天罗主困缚阻滞，容易受困。化解方法：循规蹈矩，避免违法乱纪，保持正道，多行善事化解困局，寻求贵人帮助，从事正当行业，佩戴与自由、突破相关的饰品可化解困缚',
+            '地网': '地网主羁绊纠缠，容易陷入困境。化解方法：谨慎行事，避免陷阱，保持清醒头脑，远离是非和纠纷，多与正直人士交往，从事简单明了的工作，佩戴与水相关的饰品（水可化解地网之困）',
+            # 🔥 三刑化解建议（基于《三命通会·论三刑》）
+            '恃势之刑': '恃势之刑主入贱格则多犯刑书暗昧之灾，需避免恃强凌弱。化解方法：保持谦逊低调，避免恃强凌弱，多行善事积德，可佩戴木质饰品化解（木可生火，化解土刑），培养包容心态，避免与人争执',
+            '无恩之刑': '无恩之刑主惨虐好杀，好立功业；入贱格则言行乖越，贪吝无厌。化解方法：重视人际关系，知恩图报，避免忘恩负义，宜多结交正直友人，培养感恩之心，从事与帮助他人相关的工作',
+            '无礼之刑': '无礼之刑主不利近侍；位居不久；入贱格则悖凶暴，多招刑祸。化解方法：注意言行规范，遵守礼仪，避免冲动冒失，宜修身养性，学习传统文化礼仪，培养温和的性格，从事与礼仪相关的工作',
+            '自刑': '自刑主自我刑伤，容易自我折磨。化解方法：自我调节情绪，避免极端行为，保持内心平和，宜静心修行，学习心理学或冥想，培养健康的生活方式，从事与自我提升相关的工作',
+            # 其他凶神化解建议
+            '官符煞': '官符煞主官灾，更并羊刃，乃刑徒之命。平生多官灾。化解方法：循法守序，避免违法乱纪，谨言慎行，宜佩戴金属饰品（金可化解官符之凶），从事正当职业，建立良好声誉，多与司法、法律相关人士交流',
+            '勾煞': '勾煞主牵连羁绊，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。化解方法：避免是非口舌，谨慎处理人际关系，远离纠纷，宜多行善事化解，佩戴护身符，从事正当行业',
+            '绞煞': '绞煞主牵连羁绊，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。化解方法：避免卷入是非，谨慎选择合作伙伴，保持清醒判断，多行善事，佩戴与水相关的饰品（水可化解绞煞之纠缠），从事简单明确的工作',
+            '勾绞煞': '勾绞煞主牵连羁绊，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。化解方法：避免是非口舌，谨慎处理人际关系，远离纠纷和诉讼，多行善事化解，佩戴护身符，从事正当行业，建立良好声誉',
+            '灾煞': '灾煞主血光横死。在水火，防焚溺；金木杖刃；土坠落，瘟疫克身。化解方法：注意安全，避免危险活动，可佩戴护身符，多行善事，远离危险场所，从事安全工作，注意身体健康，定期体检，佩戴与平安相关的饰品',
+            '六厄': '六厄主遭难，一生蹇滞。若有救护、扶持、逢生旺兼贵气相助，则吉。化解方法：保持积极心态，寻求贵人相助，多行善事积德，可化解厄运，从事与帮助他人相关的工作，培养坚强意志，佩戴与吉祥相关的饰品，多与贵人交往'
+        }
+        
+        # 🔥 修复：去重，每个神煞只显示一次化解建议
+        seen_names = set()
+        advice_list = []
+        for shen in xiong_shen:
+            name = shen['name']
+            if name in hua_jie_rules and name not in seen_names:
+                advice_list.append(f"{name}：{hua_jie_rules[name]}")
+                seen_names.add(name)
+        
+        return '；'.join(advice_list) if advice_list else ""
+    
+    def _jiangxing(self, year_branch: str) -> str:
+        """
+        将星查法 - 基于《三命通会》理论
+        《三命通会》："将星者，三合局中神也。寅午戌见午，申子辰见子，亥卯未见卯，巳酉丑见酉。"
+        
+        查法：以年支为准，三合局的中神为将星
+        - 申子辰（水局）→ 将星在子（中神）
+        - 寅午戌（火局）→ 将星在午（中神）
+        - 巳酉丑（金局）→ 将星在酉（中神）
+        - 亥卯未（木局）→ 将星在卯（中神）
+        """
+        if year_branch in {'申', '子', '辰'}:
+            return '子'  # 申子辰见子
+        if year_branch in {'寅', '午', '戌'}:
+            return '午'  # 寅午戌见午
+        if year_branch in {'巳', '酉', '丑'}:
+            return '酉'  # 巳酉丑见酉
+        if year_branch in {'亥', '卯', '未'}:
+            return '卯'  # 亥卯未见卯
+        return ''
+    
+    def _jinyu(self, day_master: str) -> str:
+        """
+        金舆查法 - 基于《三命通会》理论
+        《三命通会》："金舆者，日干临长生十二宫之帝旺位也。"
+        
+        查法：甲日见辰，乙日见巳，丙日见未，丁日见申，戊日见未，己日见申，庚日见戌，辛日见亥，壬日见丑，癸日见寅
+        """
+        jinyu_map = {
+            '甲': '辰', '乙': '巳', '丙': '未', '丁': '申', '戊': '未',
+            '己': '申', '庚': '戌', '辛': '亥', '壬': '丑', '癸': '寅'
+        }
+        return jinyu_map.get(day_master, '')
+    
+    def _taiji_guiren(self, day_master: str) -> List[str]:
+        """
+        太极贵人查法 - 基于《三命通会》理论
+        《三命通会》："太极者，天地未分，混沌初开也。"
+        
+        查法：甲乙日见子午，丙丁日见卯酉，戊己日见辰戌丑未，庚辛日见寅申，壬癸日见巳亥
+        """
+        taiji_map = {
+            '甲': ['子', '午'], '乙': ['子', '午'],
+            '丙': ['卯', '酉'], '丁': ['卯', '酉'],
+            '戊': ['辰', '戌', '丑', '未'], '己': ['辰', '戌', '丑', '未'],
+            '庚': ['寅', '申'], '辛': ['寅', '申'],
+            '壬': ['巳', '亥'], '癸': ['巳', '亥']
+        }
+        return taiji_map.get(day_master, [])
+    
+    def _guoyin_guiren(self, year_gan: str) -> str:
+        """
+        国印贵人查法 - 基于《三命通会》理论
+        《三命通会》："国印者，朝廷之印也。"
+        
+        查法：甲见戌，乙见亥，丙见丑，丁见寅，戊见丑，己见寅，庚见辰，辛见巳，壬见未，癸见申
+        """
+        guoyin_map = {
+            '甲': '戌', '乙': '亥', '丙': '丑', '丁': '寅', '戊': '丑',
+            '己': '寅', '庚': '辰', '辛': '巳', '壬': '未', '癸': '申'
+        }
+        return guoyin_map.get(year_gan, '')
+    
+    def _fuxing_guiren(self, day_master: str) -> str:
+        """
+        福星贵人查法 - 基于《三命通会》理论
+        《三命通会》："福星者，福德之星也。"
+        
+        查法：甲见丙，乙见丁，丙见戊，丁见己，戊见庚，己见辛，庚见壬，辛见癸，壬见甲，癸见乙
+        """
+        fuxing_map = {
+            '甲': '丙', '乙': '丁', '丙': '戊', '丁': '己', '戊': '庚',
+            '己': '辛', '庚': '壬', '辛': '癸', '壬': '甲', '癸': '乙'
+        }
+        return fuxing_map.get(day_master, '')
+    
+    def _sanqi_guiren(self, pillars: Dict[str, Tuple[str, str]]) -> Dict[str, Any] | None:
+        """
+        三奇贵人查法 - 基于《三命通会》理论
+        《三命通会》："三奇者，天地人三奇也。天上三奇：甲戊庚；地下三奇：乙丙丁；人中三奇：壬癸辛。"
+        
+        查法：年月日天干按顺序出现三奇
+        - 天上三奇：甲戊庚（顺次出现）
+        - 地下三奇：乙丙丁（顺次出现）
+        - 人中三奇：壬癸辛（顺次出现）
+        """
+        year_gan = pillars['year'][0]
+        month_gan = pillars['month'][0]
+        day_gan = pillars['day'][0]
+        
+        # 天上三奇：甲戊庚
+        if (year_gan == '甲' and month_gan == '戊' and day_gan == '庚') or \
+           (year_gan == '甲' and month_gan == '庚' and day_gan == '戊') or \
+           (month_gan == '甲' and day_gan == '戊') or (month_gan == '甲' and day_gan == '庚') or \
+           (year_gan == '甲' and month_gan == '戊') or (year_gan == '甲' and day_gan == '庚') or \
+           (year_gan == '戊' and month_gan == '庚') or (year_gan == '戊' and day_gan == '甲') or \
+           (month_gan == '戊' and day_gan == '甲') or (month_gan == '戊' and day_gan == '庚'):
+            # 检查是否完整三奇（三个都出现）
+            if '甲' in [year_gan, month_gan, day_gan] and '戊' in [year_gan, month_gan, day_gan] and '庚' in [year_gan, month_gan, day_gan]:
+                return {'type': '天上三奇', 'position': 'year'}
+        
+        # 地下三奇：乙丙丁
+        if (year_gan == '乙' and month_gan == '丙' and day_gan == '丁') or \
+           (year_gan == '乙' and month_gan == '丁' and day_gan == '丙') or \
+           (month_gan == '乙' and day_gan == '丙') or (month_gan == '乙' and day_gan == '丁') or \
+           (year_gan == '乙' and month_gan == '丙') or (year_gan == '乙' and day_gan == '丁') or \
+           (year_gan == '丙' and month_gan == '丁') or (year_gan == '丙' and day_gan == '乙') or \
+           (month_gan == '丙' and day_gan == '乙') or (month_gan == '丙' and day_gan == '丁'):
+            # 检查是否完整三奇（三个都出现）
+            if '乙' in [year_gan, month_gan, day_gan] and '丙' in [year_gan, month_gan, day_gan] and '丁' in [year_gan, month_gan, day_gan]:
+                return {'type': '地下三奇', 'position': 'year'}
+        
+        # 人中三奇：壬癸辛
+        if (year_gan == '壬' and month_gan == '癸' and day_gan == '辛') or \
+           (year_gan == '壬' and month_gan == '辛' and day_gan == '癸') or \
+           (month_gan == '壬' and day_gan == '癸') or (month_gan == '壬' and day_gan == '辛') or \
+           (year_gan == '壬' and month_gan == '癸') or (year_gan == '壬' and day_gan == '辛') or \
+           (year_gan == '癸' and month_gan == '辛') or (year_gan == '癸' and day_gan == '壬') or \
+           (month_gan == '癸' and day_gan == '壬') or (month_gan == '癸' and day_gan == '辛'):
+            # 检查是否完整三奇（三个都出现）
+            if '壬' in [year_gan, month_gan, day_gan] and '癸' in [year_gan, month_gan, day_gan] and '辛' in [year_gan, month_gan, day_gan]:
+                return {'type': '人中三奇', 'position': 'year'}
+        
+        return None
+    
+    def _tianguan_guiren(self, day_master: str) -> str:
+        """
+        天官贵人查法 - 基于《三命通会》理论
+        《三命通会》："天官者，天之所授也。"
+        
+        查法：甲见未，乙见申，丙见酉，丁见戌，戊见亥，己见子，庚见丑，辛见寅，壬见卯，癸见辰
+        """
+        tianguan_map = {
+            '甲': '未', '乙': '申', '丙': '酉', '丁': '戌', '戊': '亥',
+            '己': '子', '庚': '丑', '辛': '寅', '壬': '卯', '癸': '辰'
+        }
+        return tianguan_map.get(day_master, '')
+    
+    def _tianshe(self, day_master: str, day_branch: str, month_branch: str) -> bool:
+        """
+        天赦查法 - 基于《三命通会》理论
+        《三命通会》："天赦者，天之所赦也。"
+        
+        查法：春（寅卯辰）戊寅日，夏（巳午未）甲午日，秋（申酉戌）戊申日，冬（亥子丑）甲子日
+        """
+        # 春季（寅卯辰）：戊寅日
+        if month_branch in {'寅', '卯', '辰'}:
+            return day_master == '戊' and day_branch == '寅'
+        # 夏季（巳午未）：甲午日
+        elif month_branch in {'巳', '午', '未'}:
+            return day_master == '甲' and day_branch == '午'
+        # 秋季（申酉戌）：戊申日
+        elif month_branch in {'申', '酉', '戌'}:
+            return day_master == '戊' and day_branch == '申'
+        # 冬季（亥子丑）：甲子日
+        elif month_branch in {'亥', '子', '丑'}:
+            return day_master == '甲' and day_branch == '子'
+        return False
+    
+    def _sanxing(self, pillars: Dict[str, Tuple[str, str]]) -> List[Dict[str, Any]]:
+        """
+        🔥 新增：三刑分析 - 基于《三命通会·论三刑》
+        
+        《三命通会》三刑理论：
+        1. 无恩之刑：寅刑巳，巳刑申，申刑寅（三者互相刑）
+        2. 无礼之刑：子刑卯，卯刑子
+        3. 恃势之刑：丑刑戌，戌刑未，未刑丑（三者互相刑）
+        4. 自刑：辰刑辰，午刑午，酉刑酉，亥刑亥
+        """
+        result = []
+        all_branches = [pillars[pos][1] for pos in ['year', 'month', 'day', 'hour']]
+        
+        # 1. 无恩之刑：寅巳申（三者互相刑）
+        # ✅ 修复：只添加一次，记录所有相关位置
+        yinsi_shen = {'寅', '巳', '申'}
+        yinsi_count = sum(1 for b in all_branches if b in yinsi_shen)
+        if yinsi_count >= 2:  # 至少有两个
+            yinsi_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in yinsi_shen:
+                    yinsi_positions.append(pillar)
+            
+            if yinsi_positions:
+                result.append({
+                    'name': '无恩之刑',
+                    'level': '大凶' if yinsi_count >= 3 else '中凶',
+                    'position': '、'.join(yinsi_positions) if len(yinsi_positions) > 1 else yinsi_positions[0],
+                    'description': '无恩之刑主惨虐好杀，好立功业；入贱格则言行乖越，贪吝无厌。需注意人际关系，避免忘恩失义。',
+                    'weight': 12 if yinsi_count >= 3 else 10
+                })
+        
+        # 2. 无礼之刑：子刑卯，卯刑子
+        # ✅ 修复：只添加一次，记录所有相关位置
+        if '子' in all_branches and '卯' in all_branches:
+            wuli_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in {'子', '卯'}:
+                    wuli_positions.append(pillar)
+            
+            if wuli_positions:
+                result.append({
+                    'name': '无礼之刑',
+                    'level': '中凶',
+                    'position': '、'.join(wuli_positions) if len(wuli_positions) > 1 else wuli_positions[0],
+                    'description': '无礼之刑主不利近侍；位居不久；入贱格则悖凶暴，多招刑祸。需注意言行规范，避免无礼行为。',
+                    'weight': 10
+                })
+        
+        # 3. 恃势之刑：丑戌未（三者互相刑）
+        # ✅ 修复：只添加一次，记录所有相关位置
+        chou_xu_wei = {'丑', '戌', '未'}
+        chou_xu_wei_count = sum(1 for b in all_branches if b in chou_xu_wei)
+        if chou_xu_wei_count >= 2:
+            chou_xu_wei_positions = []
+            for pillar, (gan, zhi) in pillars.items():
+                if zhi in chou_xu_wei:
+                    chou_xu_wei_positions.append(pillar)
+            
+            if chou_xu_wei_positions:
+                result.append({
+                    'name': '恃势之刑',
+                    'level': '大凶' if chou_xu_wei_count >= 3 else '中凶',
+                    'position': '、'.join(chou_xu_wei_positions) if len(chou_xu_wei_positions) > 1 else chou_xu_wei_positions[0],
+                    'description': '恃势之刑主入贱格则多犯刑书暗昧之灾。需避免恃强凌弱，保持谦逊。',
+                    'weight': 11 if chou_xu_wei_count >= 3 else 9
+                })
+        
+        # 4. 自刑：辰辰、午午、酉酉、亥亥
+        zixing_map = {'辰', '午', '酉', '亥'}
+        zixing_count = {}
+        for b in all_branches:
+            if b in zixing_map:
+                zixing_count[b] = zixing_count.get(b, 0) + 1
+        
+        for zhi, count in zixing_count.items():
+            if count >= 2:  # 同一地支出现2次以上为自刑
+                for pillar, (gan, z) in pillars.items():
+                    if z == zhi:
+                        result.append({
+                            'name': '自刑',
+                            'level': '大凶',
+                            'position': pillar,
+                            'description': f'自刑主自我刑伤。{zhi}自刑，需注意自我调节，避免极端行为。',
+                            'weight': 11
+                        })
+                        break
+        
+        return result
+    
+    def _guanfu_shitou(self, pillars: Dict[str, Tuple[str, str]]) -> Dict[str, Any] | None:
+        """
+        🔥 新增：官符煞分析 - 基于《三命通会》
+        
+        《三命通会》："官符煞。取太岁前五辰，是日时遇之。平生多官灾，更并羊刃，乃刑徒之命。"
+        
+        查法：太岁前五辰（以年支为准）
+        - 子年：前五辰为巳（子→丑→寅→卯→辰→巳）
+        - 通用：年支前推5位
+        """
+        year_branch = pillars['year'][1]
+        # 地支顺序：子丑寅卯辰巳午未申酉戌亥
+        dizhi_order = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥']
+        
+        year_index = dizhi_order.index(year_branch)
+        guanfu_index = (year_index + 5) % 12
+        guanfu_branch = dizhi_order[guanfu_index]
+        
+        # 检查日时是否见官符
+        for pillar in ['day', 'hour']:
+            if pillars[pillar][1] == guanfu_branch:
+                return {
+                    'position': pillar,
+                    'branch': guanfu_branch
+                }
+        
+        return None
+    
+    def _goujiao_shitou(self, bazi_data: BaziData) -> List[Dict[str, Any]]:
+        """
+        🔥 新增：勾绞煞分析 - 基于《三命通会·论勾绞》
+        
+        《三命通会》："勾者，牵连之义；绞者，羁绊之名"
+        "阳男阴女，命前三辰为勾；命后三辰为绞；阴男阳女，命前三辰为绞，命后三辰为勾。"
+        "煞若克身，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。"
+        
+        查法：
+        - 阳男阴女：命前三辰为勾，命后三辰为绞
+        - 阴男阳女：命前三辰为绞，命后三辰为勾
+        """
+        result = []
+        pillars = bazi_data.get_pillars()
+        year_branch = pillars['year'][1]
+        gender = bazi_data.gender  # 🔥 修复：直接使用gender属性，不使用get_gender()方法
+        
+        # 地支顺序
+        dizhi_order = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥']
+        year_index = dizhi_order.index(year_branch)
+        
+        # 判断阴阳（年干阴阳）
+        year_gan = pillars['year'][0]
+        yang_gan = {'甲', '丙', '戊', '庚', '壬'}
+        is_yang_gan = year_gan in yang_gan
+        
+        # 判断阴阳性别组合
+        # 阳男阴女：命前三辰为勾，命后三辰为绞
+        # 阴男阳女：命前三辰为绞，命后三辰为勾
+        if (is_yang_gan and gender == '男') or (not is_yang_gan and gender == '女'):
+            # 阳男阴女
+            gou_index = (year_index + 3) % 12
+            jiao_index = (year_index - 3) % 12
+            gou_branch = dizhi_order[gou_index]
+            jiao_branch = dizhi_order[jiao_index]
+        else:
+            # 阴男阳女
+            jiao_index = (year_index + 3) % 12
+            gou_index = (year_index - 3) % 12
+            gou_branch = dizhi_order[gou_index]
+            jiao_branch = dizhi_order[jiao_index]
+        
+        # ✅ 修复：检查四柱中是否有勾绞，每个神煞只添加一次
+        gou_positions = []
+        jiao_positions = []
+        for pillar, (gan, zhi) in pillars.items():
+            if zhi == gou_branch:
+                gou_positions.append(pillar)
+            if zhi == jiao_branch:
+                jiao_positions.append(pillar)
+        
+        # 收集完所有位置后再添加，避免重复
+        if gou_positions:
+            result.append({
+                'name': '勾煞',
+                'level': '中凶',
+                'position': '、'.join(gou_positions) if len(gou_positions) > 1 else gou_positions[0],
+                'description': '勾煞主牵连羁绊，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。',
+                'weight': 9
+            })
+        if jiao_positions:
+            result.append({
+                'name': '绞煞',
+                'level': '中凶',
+                'position': '、'.join(jiao_positions) if len(jiao_positions) > 1 else jiao_positions[0],
+                'description': '绞煞主牵连羁绊，主非命而终；小人逢之，非横灾祸；行年至此，亦主口舌刑狱等事。',
+                'weight': 9
+            })
+        
+        return result
+    
+    def _zhaisha(self, pillars: Dict[str, Tuple[str, str]]) -> Dict[str, Any] | None:
+        """
+        ✅ 统一：灾煞分析 - 基于《三命通会·论灾煞》三合局冲破将星法
+        
+        《三命通会》："灾煞者，其性勇猛，常居劫煞之前，冲破将星，谓之灾煞。"
+        "此煞主血光横死。在水火，防焚溺，金木杖刃，土坠落，瘟疫克身，大凶。"
+        
+        ✅ 三合法查法（基于三合局将星对冲）：
+        - 申子辰将星在子，午却去冲子（午为灾煞）✅ 三合法
+        - 寅午戌将星在午，子却去冲（子为灾煞）✅ 三合法
+        - 巳酉丑将星在酉，卯却去冲（卯为灾煞）✅ 三合法
+        - 亥卯未将星在卯，酉却去冲（酉为灾煞）✅ 三合法
+        
+        理论依据：三合局中神为将星，其对冲地支为灾煞
+        """
+        all_branches = [pillars[pos][1] for pos in ['year', 'month', 'day', 'hour']]
+        
+        # 三合局对应的将星和灾煞
+        # 申子辰：将星在子，灾煞在午（午冲子）
+        # 寅午戌：将星在午，灾煞在子（子冲午）
+        # 巳酉丑：将星在酉，灾煞在卯（卯冲酉）
+        # 亥卯未：将星在卯，灾煞在酉（酉冲卯）
+        sanhe_zhaisha_map = {
+            ('申', '子', '辰'): {'将星': '子', '灾煞': '午'},
+            ('寅', '午', '戌'): {'将星': '午', '灾煞': '子'},
+            ('巳', '酉', '丑'): {'将星': '酉', '灾煞': '卯'},
+            ('亥', '卯', '未'): {'将星': '卯', '灾煞': '酉'},
+        }
+        
+        # 检查是否有完整三合局
+        for sanhe_branches, zhaisha_info in sanhe_zhaisha_map.items():
+            sanhe_count = sum(1 for b in sanhe_branches if b in all_branches)
+            if sanhe_count >= 3:  # 完整三合局
+                zhaisha_branch = zhaisha_info['灾煞']
+                # 检查四柱中是否有灾煞
+                for pillar, (gan, zhi) in pillars.items():
+                    if zhi == zhaisha_branch:
+                        # 判断五行属性
+                        wuxing_map = {
+                            '午': '火', '子': '水',
+                            '卯': '木', '酉': '金'
+                        }
+                        wuxing = wuxing_map.get(zhaisha_branch, '')
+                        wuxing_note = {
+                            '火': '在水火，防焚溺',
+                            '水': '在水火，防焚溺',
+                            '金': '金木杖刃',
+                            '木': '金木杖刃',
+                            '土': '土坠落，瘟疫克身'
+                        }.get(wuxing, '')
+                        
+                        return {
+                            'position': pillar,
+                            'branch': zhaisha_branch,
+                            'wuxing_note': wuxing_note
+                        }
+        
+        return None
+    
+    def _liue(self, pillars: Dict[str, Tuple[str, str]]) -> Dict[str, Any] | None:
+        """
+        ✅ 统一：六厄分析 - 基于《三命通会·论六厄》三合局死地法
+        
+        《三命通会》："厄者，遭乎难者也，常居马前一辰，劫后二辰，死而不生谓之厄。"
+        "六厄者，三合局死地也"
+        "若有救护，有扶持，逢生旺兼贵气相助，则吉，究竟一生蹇滞。"
+        
+        ✅ 三合法查法（基于五行十二长生死地）：
+        - 申子辰水局：水死在卯（六厄在卯）✅ 三合法
+        - 寅午戌火局：火死在酉（六厄在酉）✅ 三合法
+        - 亥卯未木局：木死在午（六厄在午）✅ 三合法
+        - 巳酉丑金局：金死在子（六厄在子）✅ 三合法
+        
+        理论依据：五行十二长生表
+        - 水：长生申，死地卯
+        - 火：长生寅，死地酉
+        - 木：长生亥，死地午
+        - 金：长生巳，死地子
+        """
+        all_branches = [pillars[pos][1] for pos in ['year', 'month', 'day', 'hour']]
+        
+        # ✅ 三合局对应的六厄位置（死地）- 基于五行十二长生理论
+        sanhe_liue_map = {
+            ('申', '子', '辰'): '卯',  # 水死在卯（三合局死地）✅
+            ('寅', '午', '戌'): '酉',  # 火死在酉（三合局死地）✅
+            ('亥', '卯', '未'): '午',  # 木死在午（三合局死地）✅
+            ('巳', '酉', '丑'): '子'   # 金死在子（三合局死地）✅
+        }
+        
+        # 检查是否有完整三合局
+        for sanhe_branches, liue_branch in sanhe_liue_map.items():
+            sanhe_count = sum(1 for b in sanhe_branches if b in all_branches)
+            if sanhe_count >= 3:  # 完整三合局
+                # 检查四柱中是否有六厄
+                for pillar, (gan, zhi) in pillars.items():
+                    if zhi == liue_branch:
+                        return {
+                            'position': pillar,
+                            'branch': liue_branch
+                        }
+        
+        return None

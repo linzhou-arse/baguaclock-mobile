@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+requests>=2.25.0
+pygame>=2.0.0
+lunar-python>=1.4.0
+sxtwl>=1.0.0

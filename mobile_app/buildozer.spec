@@ -76,9 +76,8 @@ p4a.local_recipes = ./p4a-recipes
 # 使用开发分支以获得最新修复
 p4a.branch = develop
 
-# NDK版本（使用r25b格式，buildozer会自动下载）
-# 注意：如果使用完整版本号，需要确保与安装的版本匹配
-android.ndk = 25b
+# NDK版本（使用完整版本号以匹配安装的版本）
+android.ndk = 25.1.8937393
 
 # Android API版本
 android.api = 31
