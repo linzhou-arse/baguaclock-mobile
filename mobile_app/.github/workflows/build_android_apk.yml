@@ -116,6 +116,62 @@ jobs:
           cat buildozer.spec
           echo "===================="
       
+      - name: Setup Android SDK with command line tools
+        run: |
+          # 设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+          
+          # 下载并安装Android命令行工具
+          cd /home/runner/.buildozer/android/platform
+          
+          # 如果已经存在旧的tools目录，先备份
+          if [ -d "android-sdk/tools" ]; then
+            mv android-sdk/tools android-sdk/tools_backup
+          fi
+          
+          # 创建命令行工具目录
+          mkdir -p cmdline-tools/latest
+          cd cmdline-tools/latest
+          
+          # 下载命令行工具
+          if [ ! -f "commandlinetools-linux-9477386_latest.zip" ]; then
+            echo "下载Android命令行工具..."
+            wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+            unzip commandlinetools-linux-9477386_latest.zip
+            rm commandlinetools-linux-9477386_latest.zip
+          fi
+          
+          # 设置正确的权限
+          chmod +x bin/*
+          
+          # 接受Android SDK许可
+          echo "接受Android SDK许可..."
+          yes | ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk --licenses || true
+          
+          # 安装必要的Android构建工具
+          echo "安装platform-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platform-tools" || true
+          
+          echo "安装build-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "build-tools;34.0.0" || true
+          
+          echo "安装Android平台..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platforms;android-34" || true
+          
+          # 验证安装的工具
+          echo "验证已安装的工具:"
+          ls -la /home/runner/.buildozer/android/platform/android-sdk/platform-tools/
+          if [ -d "/home/runner/.buildozer/android/platform/android-sdk/build-tools/34.0.0" ]; then
+            ls -la /home/runner/.buildozer/android/platform/android-sdk/build-tools/34.0.0/
+          fi
+      
       - name: Build APK
         working-directory: mobile_app
         run: |
