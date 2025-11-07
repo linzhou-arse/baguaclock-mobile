@@ -55,7 +55,13 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             libsqlite3-dev \
-            liblzma-dev
+            liblzma-dev \
+            autoconf \
+            automake \
+            libtool \
+            m4 \
+            autopoint \
+            gettext
       
       - name: Set up environment variables
         run: |

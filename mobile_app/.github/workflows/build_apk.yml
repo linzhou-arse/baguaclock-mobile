@@ -56,7 +56,13 @@ jobs:
             libffi-dev \
             libcairo2-dev \
             libgirepository1.0-dev \
-            libpango1.0-dev
+            libpango1.0-dev \
+            autoconf \
+            automake \
+            libtool \
+            m4 \
+            autopoint \
+            gettext
       
       - name: Set up environment variables
         run: |
