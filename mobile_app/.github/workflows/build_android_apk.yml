@@ -98,7 +98,8 @@ jobs:
           pip3 install --upgrade pip
           pip3 install --upgrade cython
           pip3 install buildozer
-          echo "Buildozer安装完成"
+          pip3 install --upgrade python-for-android
+          echo "Buildozer和Python-for-Android安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
@@ -121,6 +122,17 @@ jobs:
           echo "=== Buildozer配置 ==="
           cat buildozer.spec
           echo "===================="
+      
+      - name: Pre-install Python-for-Android dependencies
+        working-directory: mobile_app
+        run: |
+          # 预安装Python-for-Android依赖以提高构建稳定性
+          echo "预安装Python-for-Android依赖..."
+          pip3 install --upgrade Pillow
+          pip3 install --upgrade pyjnius
+          pip3 install --upgrade plyer
+          pip3 install --upgrade requests
+          echo "依赖安装完成"
       
       - name: Setup Android SDK with command line tools
         run: |
@@ -197,12 +209,30 @@ jobs:
           which java
           java -version
           
-          # 设置超时时间
-          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          # 增加超时时间并改进错误处理
+          echo "清理之前的构建..."
+          rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+          rm -rf .buildozer/android/platform/build-*
+          
+          # 检查磁盘空间
+          echo "检查磁盘空间..."
+          df -h
+          
+          # 设置更长的超时时间
+          echo "开始构建过程..."
+          timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
           
           if [ "$BUILD_FAILED" = "true" ]; then
             echo "构建失败，尝试重新构建..."
-            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
+            # 再次清理并重新构建
+            rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+            rm -rf .buildozer/android/platform/build-*
+            # 检查日志文件
+            echo "检查构建日志..."
+            if [ -d ".buildozer/android/platform/build-arm64-v8a_armeabi-v7a" ]; then
+              find .buildozer/android/platform/build-arm64-v8a_armeabi-v7a -name "*.log" -exec tail -20 {} \;
+            fi
+            timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || echo "重新构建也失败了"
           fi
           
           echo "APK构建完成"

@@ -275,13 +275,25 @@ jobs:
           rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
           rm -rf .buildozer/android/platform/build-*
           
+          # 检查磁盘空间
+          echo "检查磁盘空间..."
+          df -h
+          
           # 设置超时时间
           echo "开始构建过程..."
           timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
           
           if [ "$BUILD_FAILED" = "true" ]; then
             echo "构建失败，尝试重新构建..."
-            timeout 3600 buildozer android ${{ github.event.inputs.build_type }}
+            # 再次清理
+            rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+            rm -rf .buildozer/android/platform/build-*
+            # 检查日志文件
+            echo "检查构建日志..."
+            if [ -d ".buildozer/android/platform/build-arm64-v8a_armeabi-v7a" ]; then
+              find .buildozer/android/platform/build-arm64-v8a_armeabi-v7a -name "*.log" -exec tail -20 {} \;
+            fi
+            timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || echo "重新构建也失败了"
           fi
           
           echo "APK构建完成"
