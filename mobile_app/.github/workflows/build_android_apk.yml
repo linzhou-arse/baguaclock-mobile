@@ -90,6 +90,9 @@ jobs:
             exit 1
           fi
           
+          # 更新buildozer.spec以确保NDK版本正确
+          sed -i 's/android.ndk =.*/android.ndk = 25.1.8937393/g' buildozer.spec
+          
           # 显示buildozer配置
           echo "=== Buildozer配置 ==="
           cat buildozer.spec

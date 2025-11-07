@@ -181,7 +181,7 @@ jobs:
           if ! grep -q "android.ndk" buildozer.spec; then
             echo "" >> buildozer.spec
             echo "# NDK版本" >> buildozer.spec
-            echo "android.ndk = 25b" >> buildozer.spec
+            echo "android.ndk = 25.1.8937393" >> buildozer.spec
           fi
           
           # 添加API版本配置
