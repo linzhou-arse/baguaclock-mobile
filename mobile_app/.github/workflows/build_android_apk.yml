@@ -55,12 +55,36 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             libsqlite3-dev \
-            liblzma-dev
+            liblzma-dev \
+            autoconf \
+            automake \
+            libtool \
+            m4 \
+            autopoint \
+            gettext
       
       - name: Set up environment variables
         run: |
           echo "ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
           echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "JAVA_HOME_17_X64=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "JAVA_HOME_11_X64=" >> $GITHUB_ENV
+          echo "JAVA_HOME_21_X64=" >> $GITHUB_ENV
+          echo "JAVA_HOME_25_X64=" >> $GITHUB_ENV
+      
+      - name: Force set Java 17 as default Java version
+        run: |
+          # 强制设置Java 17为默认版本，避免系统使用其他Java版本
+          sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java 17
+          sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac 17
+          sudo update-alternatives --set java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java
+          sudo update-alternatives --set javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac
+          
+          # 验证Java版本
+          echo "验证Java版本："
+          java -version
+          javac -version
       
       - name: Clean build environment
         if: ${{ github.event.inputs.clean_build == 'true' }}
@@ -74,7 +98,8 @@ jobs:
           pip3 install --upgrade pip
           pip3 install --upgrade cython
           pip3 install buildozer
-          echo "Buildozer安装完成"
+          pip3 install --upgrade python-for-android
+          echo "Buildozer和Python-for-Android安装完成"
       
       - name: Copy modules
         working-directory: mobile_app
@@ -90,10 +115,80 @@ jobs:
             exit 1
           fi
           
+          # 更新buildozer.spec以确保NDK版本正确
+          sed -i 's/android.ndk =.*/android.ndk = 25.1.8937393/g' buildozer.spec
+          
           # 显示buildozer配置
           echo "=== Buildozer配置 ==="
           cat buildozer.spec
           echo "===================="
+      
+      - name: Pre-install Python-for-Android dependencies
+        working-directory: mobile_app
+        run: |
+          # 预安装Python-for-Android依赖以提高构建稳定性
+          echo "预安装Python-for-Android依赖..."
+          pip3 install --upgrade Pillow
+          pip3 install --upgrade pyjnius
+          pip3 install --upgrade plyer
+          pip3 install --upgrade requests
+          echo "依赖安装完成"
+      
+      - name: Setup Android SDK with command line tools
+        run: |
+          # 设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          
+          # 验证Java版本
+          echo "Java版本信息："
+          java -version
+          
+          # 下载并安装Android命令行工具
+          cd /home/runner/.buildozer/android/platform
+          
+          # 如果已经存在旧的tools目录，先备份
+          if [ -d "android-sdk/tools" ]; then
+            mv android-sdk/tools android-sdk/tools_backup
+          fi
+          
+          # 创建命令行工具目录
+          mkdir -p cmdline-tools/latest
+          cd cmdline-tools/latest
+          
+          # 下载命令行工具
+          if [ ! -f "commandlinetools-linux-9477386_latest.zip" ]; then
+            echo "下载Android命令行工具..."
+            wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+            unzip commandlinetools-linux-9477386_latest.zip
+            rm commandlinetools-linux-9477386_latest.zip
+          fi
+          
+          # 设置正确的权限
+          chmod +x bin/*
+          
+          # 接受Android SDK许可
+          echo "接受Android SDK许可..."
+          yes | ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk --licenses || true
+          
+          # 安装必要的Android构建工具
+          echo "安装platform-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platform-tools" || true
+          
+          echo "安装build-tools..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "build-tools;34.0.0" || true
+          
+          echo "安装Android平台..."
+          ./bin/sdkmanager --sdk_root=/home/runner/.buildozer/android/platform/android-sdk "platforms;android-34" || true
+          
+          # 验证安装的工具
+          echo "验证已安装的工具:"
+          ls -la /home/runner/.buildozer/android/platform/android-sdk/platform-tools/
+          if [ -d "/home/runner/.buildozer/android/platform/android-sdk/build-tools/34.0.0" ]; then
+            ls -la /home/runner/.buildozer/android/platform/android-sdk/build-tools/34.0.0/
+          fi
       
       - name: Build APK
         working-directory: mobile_app
@@ -101,12 +196,43 @@ jobs:
           echo "开始构建APK..."
           echo "构建类型: ${{ github.event.inputs.build_type }}"
           
-          # 设置超时时间
-          timeout 1800 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
+          # 强制设置环境变量
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          export PATH=/usr/lib/jvm/temurin-17-jdk-amd64/bin:$PATH
+          export ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk
+          export ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk
+          
+          # 再次确认环境变量
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "PATH中的Java位置:"
+          which java
+          java -version
+          
+          # 增加超时时间并改进错误处理
+          echo "清理之前的构建..."
+          rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+          rm -rf .buildozer/android/platform/build-*
+          
+          # 检查磁盘空间
+          echo "检查磁盘空间..."
+          df -h
+          
+          # 设置更长的超时时间
+          echo "开始构建过程..."
+          timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || BUILD_FAILED=true
           
           if [ "$BUILD_FAILED" = "true" ]; then
             echo "构建失败，尝试重新构建..."
-            timeout 1800 buildozer android ${{ github.event.inputs.build_type }}
+            # 再次清理并重新构建
+            rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a
+            rm -rf .buildozer/android/platform/build-*
+            # 检查日志文件
+            echo "检查构建日志..."
+            if [ -d ".buildozer/android/platform/build-arm64-v8a_armeabi-v7a" ]; then
+              find .buildozer/android/platform/build-arm64-v8a_armeabi-v7a -name "*.log" -exec tail -20 {} \;
+            fi
+            timeout 3600 buildozer android ${{ github.event.inputs.build_type }} || echo "重新构建也失败了"
           fi
           
           echo "APK构建完成"
