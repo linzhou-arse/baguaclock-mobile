@@ -60,7 +60,25 @@ jobs:
       - name: Set up environment variables
         run: |
           echo "ANDROID_HOME=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
           echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "JAVA_HOME_17_X64=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "JAVA_HOME_11_X64=" >> $GITHUB_ENV
+          echo "JAVA_HOME_21_X64=" >> $GITHUB_ENV
+          echo "JAVA_HOME_25_X64=" >> $GITHUB_ENV
+      
+      - name: Force set Java 17 as default Java version
+        run: |
+          # 强制设置Java 17为默认版本，避免系统使用其他Java版本
+          sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java 17
+          sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac 17
+          sudo update-alternatives --set java /usr/lib/jvm/temurin-17-jdk-amd64/bin/java
+          sudo update-alternatives --set javac /usr/lib/jvm/temurin-17-jdk-amd64/bin/javac
+          
+          # 验证Java版本
+          echo "验证Java版本："
+          java -version
+          javac -version
       
       - name: Clean build environment
         if: ${{ github.event.inputs.clean_build == 'true' }}
